@@ -6,10 +6,10 @@
 ;========================================================
 
         .module crt0
-        .area   _HEADER (ABS)
+        .area   _CODE
 
         ;; Entry point at TPA_BASE (0x0100)
-        .org    0x0100
+        ;; Linker will place this at --code-loc address
 
 ;--------------------------------------------------------
 ; Constants from JX system

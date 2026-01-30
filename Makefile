@@ -162,14 +162,14 @@ bios-hex: dirs check-tools $(BUILD_DIR)/bios.hex
 	@echo "BIOS built: $(BUILD_DIR)/bios.hex"
 
 # BDOS targets (explicit rules due to subdirectory structure)
-# Note: BDOS defines its own memory addresses internally
+# Note: BDOS needs BIOS_BASE to call BIOS functions
 $(BUILD_DIR)/bdos.bin: $(BDOS_DIR)/bdos.asm | dirs
 	@echo "ASM  $< -> $@ (raw binary)"
-	@$(Z80ASM) $(ASM_FLAGS_BIN) -o$@ $<
+	@$(Z80ASM) $(ASM_FLAGS_BIN) $(MEM_DEFINES) -o$@ $<
 
 $(BUILD_DIR)/bdos.hex: $(BDOS_DIR)/bdos.asm | dirs
 	@echo "ASM  $< -> $@ (Intel HEX)"
-	@$(Z80ASM) $(ASM_FLAGS_HEX) -o$@ $<
+	@$(Z80ASM) $(ASM_FLAGS_HEX) $(MEM_DEFINES) -o$@ $<
 
 bdos: dirs check-tools $(BDOS_BIN)
 	@echo "BDOS built: $(BDOS_BIN)"

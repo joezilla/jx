@@ -6,18 +6,15 @@
 uint16_t bdos(uint8_t func, uint16_t arg) __naked {
     func; arg; // Suppress unused parameter warnings
     __asm
-        ; SDCC calling convention for Z80:
-        ; First parameter (func) is in stack
-        ; Second parameter (arg) is in stack
-        ; We need to set up: C = func, DE = arg
+        ; SDCC calling convention for Z80 (register parameters):
+        ; First parameter (func, uint8_t) arrives in A register
+        ; Second parameter (arg, uint16_t) arrives in DE register
+        ; We need to set up: C = func, DE = arg (already correct)
 
-        pop     hl              ; Return address
-        pop     de              ; DE = arg (16-bit)
-        pop     bc              ; BC = func (only C is used)
-        push    bc              ; Restore stack
-        push    de
-        push    hl
+        ; Move func from A to C
+        ld      c, a            ; C = func
 
+        ; DE already contains arg parameter
         ; Call BDOS at 0x0005
         call    0x0005
 

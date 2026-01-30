@@ -32,13 +32,14 @@ MEMTOP          EQU     00000H
 
 ;--------------------------------------------------------
 ; BIOS Jump Table Addresses
-; Calculated as BIOS_BASE (0xFD00) + offset
+; Calculated as BIOS_BASE + offset
+; BIOS_BASE is passed via assembler flag (e.g., -dBIOS_BASE=0FD00H)
 ; Simple names without underscores to avoid z80asm bugs
 ;--------------------------------------------------------
-BIOSC           EQU     0FD06H
-BIOSI           EQU     0FD09H
-BIOO            EQU     0FD0CH
-BIOSL           EQU     0FD0FH
+BIOSC           EQU     BIOS_BASE+6     ; Console status
+BIOSI           EQU     BIOS_BASE+9     ; Console input
+BIOO            EQU     BIOS_BASE+12    ; Console output
+BIOSL           EQU     BIOS_BASE+15    ; List output
 
 ;--------------------------------------------------------
 ; ASCII Constants
@@ -63,44 +64,27 @@ BDOS_ENTRY:
         CPI     33H             ; Check range
         JNC     BDOS_INVALID    ; Invalid function
 
-        ; Save registers
-        PUSH    B
+        ; Save DE (contains parameter)
         PUSH    D
-        PUSH    H
 
         ; Calculate jump table offset
         MOV     L,A
         MVI     H,0
-        DAD     H               ; *2
+        DAD     H               ; *2 for word table
         LXI     B,FUNC_TABLE
-        DAD     B
+        DAD     B               ; HL = &FUNC_TABLE[func]
 
-        ; Get function address
-        MOV     A,M
+        ; Get function address from table
+        MOV     E,M
         INX     H
-        MOV     H,M
-        MOV     L,A
+        MOV     D,M             ; DE = function address
 
-        ; Restore DE for parameter passing
-        POP     B               ; Was H
-        PUSH    B
-        POP     D
-        PUSH    D
-        XCHG
-        POP     D
-        POP     D
-        POP     B
-        PUSH    B
-        PUSH    D
-        PUSH    H
+        ; Restore parameter in DE, put function address in HL
+        XCHG                    ; HL = function address, DE = junk
+        POP     D               ; DE = parameter (restored)
 
-        ; Jump to function
-        XCHG
-        POP     H
-        XCHG
-        POP     D
-        POP     B
-        PCHL
+        ; Jump to function (C = function, DE = parameter, HL = function address)
+        PCHL                    ; Jump to function
 
 BDOS_INVALID:
         MVI     A,0FFH
@@ -184,7 +168,7 @@ F_CONIN:
 ; Function 02: Console Output
 ;========================================================
 F_CONOUT:
-        MOV     C,E             ; Character in E
+        MOV     C,E             ; Character in E, BIOS expects in C
         CALL    BIOO
         RET
 
