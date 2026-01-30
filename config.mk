@@ -7,7 +7,7 @@
 # z80pack Installation Path
 # ----------------------------------------------
 # Path to the z80pack installation directory
-Z80PACK_DIR = /Users/mreppot/src/z80pack
+Z80PACK_DIR = ../z80pack
 
 # ----------------------------------------------
 # Assembler Configuration
@@ -47,6 +47,32 @@ SIM_FLAGS = -8 -m 00
 DISK_PATH = $(Z80PACK_DIR)/cpmsim/disks
 
 # ----------------------------------------------
+# SDCC C Compiler Configuration
+# ----------------------------------------------
+# Path to SDCC compiler
+SDCC = sdcc
+
+# SDCC flags for 8080 target
+# -mz80          : Z80/8080 target (8080 is subset)
+# --std-c11      : Use C11 standard
+# --opt-code-size: Optimize for code size
+# --fverbose-asm : Generate verbose assembly output
+SDCC_FLAGS = -mz80 --std-c11 --opt-code-size --fverbose-asm
+
+# SDCC assembler (for .asm -> .rel)
+SDCC_AS = sdasz80
+
+# SDCC linker
+SDCC_LD = sdldz80
+
+# SDCC archiver (for creating libraries)
+SDCC_AR = sdar
+
+# C library directories
+CLIB_DIR = $(SRC_DIR)/clib
+CLIB_BUILD = $(BUILD_DIR)/clib
+
+# ----------------------------------------------
 # Memory Configuration
 # ----------------------------------------------
 # Target memory size in KB (32, 48, or 64)
@@ -62,6 +88,7 @@ BIOS_DIR = $(SRC_DIR)/bios
 BDOS_DIR = $(SRC_DIR)/bdos
 CCP_DIR = $(SRC_DIR)/ccp
 TEST_DIR = $(SRC_DIR)/test
+EXAMPLES_DIR = $(SRC_DIR)/examples
 
 # ----------------------------------------------
 # Output Files
@@ -72,4 +99,4 @@ SYSTEM_IMAGE = $(BUILD_DIR)/jx.bin
 # Component binaries
 BIOS_BIN = $(BUILD_DIR)/bios.bin
 BDOS_BIN = $(BUILD_DIR)/bdos.bin
-CCP_BIN = $(BUILD_DIR)/ccp.bin
+CCP_BIN = $(BUILD_DIR)/ccp/ccp.bin

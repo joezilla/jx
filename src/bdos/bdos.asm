@@ -10,29 +10,35 @@
 ;========================================================
 
 ;--------------------------------------------------------
-; Ensure addresses are defined
+; Memory addresses for 64KB configuration
+; Note: These must be coordinated with BIOS and build system
 ;--------------------------------------------------------
-IFNDEF BDOS_BASE
-BDOS_BASE       EQU     0F600H  ; Default for 64KB
-ENDIF
-
-IFNDEF BIOS_BASE
-BIOS_BASE       EQU     0FE00H  ; Default for 64KB
-ENDIF
-
-IFNDEF TPA_TOP
-TPA_TOP         EQU     0F500H  ; Default for 64KB
-ENDIF
+; For other memory sizes, edit these values:
+;   32KB: BDOS_BASE=7500H, BIOS_BASE=7D00H, TPA_TOP=7400H, MEMTOP=8000H
+;   48KB: BDOS_BASE=B500H, BIOS_BASE=BD00H, TPA_TOP=B400H, MEMTOP=C000H
+;   64KB: BDOS_BASE=F500H, BIOS_BASE=FD00H, TPA_TOP=F400H, MEMTOP=0000H
+;
+; BDOS_BASE: BDOS load address
+; BIOS_BASE: BIOS load address
+; TPA_TOP: Top of TPA (Transient Program Area)
+; MEMTOP: Total memory (64KB wraps to 0)
+;--------------------------------------------------------
+BDOS_BASE       EQU     0F500H
+BIOS_BASE       EQU     0FD00H
+TPA_TOP         EQU     0F400H
+MEMTOP          EQU     00000H
 
         ORG     BDOS_BASE
 
 ;--------------------------------------------------------
-; BIOS Jump Table Offsets
+; BIOS Jump Table Addresses
+; Calculated as BIOS_BASE (0xFD00) + offset
+; Simple names without underscores to avoid z80asm bugs
 ;--------------------------------------------------------
-BIOS_CONST      EQU     BIOS_BASE+06H
-BIOS_CONIN      EQU     BIOS_BASE+09H
-BIOS_CONOUT     EQU     BIOS_BASE+0CH
-BIOS_LIST       EQU     BIOS_BASE+0FH
+BIOSC           EQU     0FD06H
+BIOSI           EQU     0FD09H
+BIOO            EQU     0FD0CH
+BIOSL           EQU     0FD0FH
 
 ;--------------------------------------------------------
 ; ASCII Constants
@@ -169,7 +175,7 @@ F_RESET:
 ; Function 01: Console Input
 ;========================================================
 F_CONIN:
-        CALL    BIOS_CONIN
+        CALL    BIOSI
         MOV     L,A
         MVI     H,0
         RET
@@ -179,7 +185,7 @@ F_CONIN:
 ;========================================================
 F_CONOUT:
         MOV     C,E             ; Character in E
-        CALL    BIOS_CONOUT
+        CALL    BIOO
         RET
 
 ;========================================================
@@ -202,7 +208,7 @@ F_PUNCH:
 ;========================================================
 F_LIST:
         MOV     C,E
-        CALL    BIOS_LIST
+        CALL    BIOSL
         RET
 
 ;========================================================
@@ -211,28 +217,28 @@ F_LIST:
 F_RAWIO:
         MOV     A,E
         CPI     0FFH            ; Input request?
-        JZ      F_RAWIO_IN
+        JZ      FRAWIOIN
         CPI     0FEH            ; Status request?
-        JZ      F_RAWIO_STAT
+        JZ      FRAWIOSTAT
         ; Output
         MOV     C,E
-        CALL    BIOS_CONOUT
+        CALL    BIOO
         RET
-F_RAWIO_IN:
-        CALL    BIOS_CONST
+FRAWIOIN:
+        CALL    BIOSC
         ORA     A
-        JZ      F_RAWIO_NONE
-        CALL    BIOS_CONIN
+        JZ      FRAWIONONE
+        CALL    BIOSI
         MOV     L,A
         MVI     H,0
         RET
-F_RAWIO_NONE:
+FRAWIONONE:
         XRA     A
         MOV     L,A
         MOV     H,A
         RET
-F_RAWIO_STAT:
-        CALL    BIOS_CONST
+FRAWIOSTAT:
+        CALL    BIOSC
         MOV     L,A
         MVI     H,0
         RET
@@ -259,14 +265,14 @@ F_SETIOB:
 ;========================================================
 F_PRINT:
         XCHG                    ; HL = string address
-F_PRINT_LOOP:
+FPRINTLOOP:
         MOV     A,M
         CPI     '$'
         RZ
         MOV     C,A
-        CALL    BIOS_CONOUT
+        CALL    BIOO
         INX     H
-        JMP     F_PRINT_LOOP
+        JMP     FPRINTLOOP
 
 ;========================================================
 ; Function 0A: Read Console Buffer
@@ -278,46 +284,46 @@ F_READLN:
         PUSH    H               ; Save count location
         INX     H               ; Point to data area
         MVI     C,0             ; C = current count
-F_READLN_LOOP:
-        CALL    BIOS_CONIN
+FREADLNLOOP:
+        CALL    BIOSI
         CPI     CR              ; Enter pressed?
-        JZ      F_READLN_DONE
+        JZ      FREADLNDONE
         CPI     08H             ; Backspace?
-        JZ      F_READLN_BS
+        JZ      FREADLNBS
         CPI     7FH             ; Delete?
-        JZ      F_READLN_BS
+        JZ      FREADLNBS
         ; Check if buffer full
         MOV     A,C
         CMP     B
-        JNC     F_READLN_LOOP   ; Buffer full, ignore
+        JNC     FREADLNLOOP     ; Buffer full, ignore
         ; Store character
-        CALL    BIOS_CONIN      ; Re-read (already in A)
+        CALL    BIOSI           ; Re-read (already in A)
         MOV     M,A
         INX     H
         INR     C
         ; Echo character
         PUSH    B
         MOV     C,A
-        CALL    BIOS_CONOUT
+        CALL    BIOO
         POP     B
-        JMP     F_READLN_LOOP
-F_READLN_BS:
+        JMP     FREADLNLOOP
+FREADLNBS:
         MOV     A,C
         ORA     A
-        JZ      F_READLN_LOOP   ; Nothing to delete
+        JZ      FREADLNLOOP     ; Nothing to delete
         DCR     C
         DCX     H
         ; Echo backspace sequence
         PUSH    B
         MVI     C,08H
-        CALL    BIOS_CONOUT
+        CALL    BIOO
         MVI     C,' '
-        CALL    BIOS_CONOUT
+        CALL    BIOO
         MVI     C,08H
-        CALL    BIOS_CONOUT
+        CALL    BIOO
         POP     B
-        JMP     F_READLN_LOOP
-F_READLN_DONE:
+        JMP     FREADLNLOOP
+FREADLNDONE:
         POP     H               ; Get count location
         MOV     M,C             ; Store count
         RET
@@ -326,7 +332,7 @@ F_READLN_DONE:
 ; Function 0B: Console Status
 ;========================================================
 F_CONST:
-        CALL    BIOS_CONST
+        CALL    BIOSC
         MOV     L,A
         MVI     H,0
         RET
@@ -389,12 +395,10 @@ F_GETTPA:
 ;========================================================
 ; Function 32: Get Total Memory
 ;========================================================
+; Returns MEMTOP value (defined via -dMEMTOP=xxxx)
+; For 64KB systems, MEMTOP=0 (wraps to 0)
 F_GETMEM:
-IFDEF MEMTOP
         LXI     H,MEMTOP
-ELSE
-        LXI     H,0             ; 64KB (wraps to 0)
-ENDIF
         RET
 
 ;========================================================

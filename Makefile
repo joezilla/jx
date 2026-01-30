@@ -106,7 +106,7 @@ check-tools:
 # ----------------------------------------------
 # Directory Creation
 # ----------------------------------------------
-dirs:
+dirs: dirs-clib
 	@mkdir -p $(BUILD_DIR)
 	@mkdir -p $(BUILD_DIR)/test
 
@@ -134,18 +134,14 @@ $(BUILD_DIR)/test/%.bin: $(TEST_DIR)/%.asm | dirs
 # ----------------------------------------------
 # System Image
 # ----------------------------------------------
-# For now, this is a placeholder that concatenates components
-# A proper system builder tool will be needed later
-$(SYSTEM_IMAGE): $(BIOS_BIN) $(BDOS_BIN) | dirs
-	@echo "BUILD $(SYSTEM_IMAGE)"
-	@if [ -f "$(BIOS_BIN)" ] && [ -f "$(BDOS_BIN)" ]; then \
-		cat $(BDOS_BIN) $(BIOS_BIN) > $(SYSTEM_IMAGE); \
-	elif [ -f "$(BIOS_BIN)" ]; then \
-		cp $(BIOS_BIN) $(SYSTEM_IMAGE); \
-	else \
-		echo "No system components built yet"; \
-		touch $(SYSTEM_IMAGE); \
-	fi
+# System image with CCP, BDOS, and BIOS
+# Layout: CCP (loaded at 0x0100) + BDOS + BIOS
+$(SYSTEM_IMAGE): $(CCP_BIN) $(BDOS_BIN) $(BIOS_BIN) | dirs
+	@echo "BUILD $(SYSTEM_IMAGE) with CCP"
+	@cat $(CCP_BIN) $(BDOS_BIN) $(BIOS_BIN) > $(SYSTEM_IMAGE)
+	@echo "  CCP:  $(CCP_BIN) ("`ls -lh $(CCP_BIN) | awk '{print $$5}'`")"
+	@echo "  BDOS: $(BDOS_BIN)"
+	@echo "  BIOS: $(BIOS_BIN)"
 
 # ----------------------------------------------
 # Component Targets
@@ -165,11 +161,18 @@ bios: dirs check-tools $(BIOS_BIN)
 bios-hex: dirs check-tools $(BUILD_DIR)/bios.hex
 	@echo "BIOS built: $(BUILD_DIR)/bios.hex"
 
+# BDOS targets (explicit rules due to subdirectory structure)
+# Note: BDOS defines its own memory addresses internally
+$(BUILD_DIR)/bdos.bin: $(BDOS_DIR)/bdos.asm | dirs
+	@echo "ASM  $< -> $@ (raw binary)"
+	@$(Z80ASM) $(ASM_FLAGS_BIN) -o$@ $<
+
+$(BUILD_DIR)/bdos.hex: $(BDOS_DIR)/bdos.asm | dirs
+	@echo "ASM  $< -> $@ (Intel HEX)"
+	@$(Z80ASM) $(ASM_FLAGS_HEX) -o$@ $<
+
 bdos: dirs check-tools $(BDOS_BIN)
 	@echo "BDOS built: $(BDOS_BIN)"
-
-ccp: dirs check-tools $(CCP_BIN)
-	@echo "CCP built: $(CCP_BIN)"
 
 # ----------------------------------------------
 # Test Targets
@@ -184,6 +187,125 @@ test-%: dirs check-tools $(BUILD_DIR)/test/%.hex $(BUILD_DIR)/test/%.bin
 	@echo "Built test: $*"
 	@echo "  $(BUILD_DIR)/test/$*.hex (Intel HEX)"
 	@echo "  $(BUILD_DIR)/test/$*.bin (raw binary)"
+
+# ----------------------------------------------
+# C Compilation Rules
+# ----------------------------------------------
+# Find C source files in clib
+CLIB_C_SRCS = $(wildcard $(CLIB_DIR)/bdos/*.c) \
+              $(wildcard $(CLIB_DIR)/stdio/*.c) \
+              $(wildcard $(CLIB_DIR)/string/*.c) \
+              $(wildcard $(CLIB_DIR)/stdlib/*.c)
+
+# Generate .rel object file names
+CLIB_OBJS = $(patsubst $(CLIB_DIR)/%.c,$(CLIB_BUILD)/%.rel,$(CLIB_C_SRCS))
+
+# C library archive
+LIBJX = $(BUILD_DIR)/libjx.lib
+
+# crt0 object file
+CRT0_REL = $(CLIB_BUILD)/crt0.rel
+
+# Create clib subdirectories
+dirs-clib:
+	@mkdir -p $(CLIB_BUILD)/bdos $(CLIB_BUILD)/stdio $(CLIB_BUILD)/string $(CLIB_BUILD)/stdlib $(CLIB_BUILD)/crt0
+	@mkdir -p $(BUILD_DIR)/examples
+	@mkdir -p $(BUILD_DIR)/ccp
+
+# Assemble crt0.s to crt0.rel
+$(CRT0_REL): $(CLIB_DIR)/crt0/crt0.s | dirs-clib
+	@echo "AS   $<"
+	@$(SDCC_AS) -plosgff -o $@ $<
+
+# Compile C source to .rel
+$(CLIB_BUILD)/%.rel: $(CLIB_DIR)/%.c | dirs-clib
+	@echo "CC   $<"
+	@$(SDCC) $(SDCC_FLAGS) -I$(CLIB_DIR) -c -o $@ $<
+
+# Build C library archive
+$(LIBJX): $(CLIB_OBJS) | dirs-clib
+	@echo "AR   $@"
+	@rm -f $@
+	@$(SDCC_AR) -rc $@ $(CLIB_OBJS)
+
+# Compile C example programs
+$(BUILD_DIR)/examples/%.rel: $(EXAMPLES_DIR)/%.c | dirs-clib
+	@echo "CC   $<"
+	@$(SDCC) $(SDCC_FLAGS) -I$(CLIB_DIR) -c -o $@ $<
+
+# Link C program to .ihx
+$(BUILD_DIR)/examples/%.ihx: $(BUILD_DIR)/examples/%.rel $(CRT0_REL) $(LIBJX) | dirs-clib
+	@echo "LD   $@"
+	@$(SDCC) $(SDCC_FLAGS) \
+		--code-loc 0x0100 \
+		--data-loc 0x8000 \
+		--no-std-crt0 \
+		-o $@ \
+		$(CRT0_REL) \
+		$(BUILD_DIR)/examples/$*.rel \
+		$(LIBJX)
+
+# Convert .ihx to .hex (Intel HEX format)
+$(BUILD_DIR)/examples/%.hex: $(BUILD_DIR)/examples/%.ihx
+	@echo "HEX  $@"
+	@cp $< $@
+
+# Convert .ihx to .bin (raw binary)
+$(BUILD_DIR)/examples/%.bin: $(BUILD_DIR)/examples/%.ihx
+	@echo "BIN  $@"
+	@objcopy -I ihex -O binary $< $@
+
+# Build all C examples
+examples: dirs-clib $(LIBJX) $(CRT0_REL)
+	@echo "C library and examples ready"
+	@echo "To build an example: make $(BUILD_DIR)/examples/<name>.hex"
+
+# Build and run a C example
+# Usage: make run-example EXAMPLE=hello
+run-example:
+ifndef EXAMPLE
+	@echo "Usage: make run-example EXAMPLE=<name>"
+	@echo "Available examples:"
+	@ls -1 $(EXAMPLES_DIR)/*.c 2>/dev/null | xargs -I {} basename {} .c | sed 's/^/  /' || echo "  (none yet)"
+	@exit 1
+endif
+	@$(MAKE) $(BUILD_DIR)/examples/$(EXAMPLE).hex
+	@echo "Running example: $(EXAMPLE)"
+	@$(SIMULATOR) $(SIM_FLAGS) -x $(BUILD_DIR)/examples/$(EXAMPLE).hex
+
+# ----------------------------------------------
+# CCP Build Rules
+# ----------------------------------------------
+# Compile CCP source
+$(BUILD_DIR)/ccp/ccp.rel: $(CCP_DIR)/ccp.c | dirs-clib
+	@echo "CC   $<"
+	@$(SDCC) $(SDCC_FLAGS) -I$(CLIB_DIR) -c -o $@ $<
+
+# Link CCP to .ihx
+$(BUILD_DIR)/ccp/ccp.ihx: $(BUILD_DIR)/ccp/ccp.rel $(CRT0_REL) $(LIBJX) | dirs-clib
+	@echo "LD   $@"
+	@$(SDCC) $(SDCC_FLAGS) \
+		--code-loc 0x0100 \
+		--data-loc 0x8000 \
+		--no-std-crt0 \
+		-o $@ \
+		$(CRT0_REL) \
+		$(BUILD_DIR)/ccp/ccp.rel \
+		$(LIBJX)
+
+# Convert CCP to .hex format
+$(BUILD_DIR)/ccp/ccp.hex: $(BUILD_DIR)/ccp/ccp.ihx
+	@echo "HEX  $@"
+	@cp $< $@
+
+# Convert CCP to .bin format
+$(BUILD_DIR)/ccp/ccp.bin: $(BUILD_DIR)/ccp/ccp.ihx
+	@echo "BIN  $@"
+	@makebin -p $< $@
+
+# Build CCP
+ccp: dirs-clib $(BUILD_DIR)/ccp/ccp.hex $(BUILD_DIR)/ccp/ccp.bin
+	@echo "CCP built: $(BUILD_DIR)/ccp/ccp.hex"
 
 # ----------------------------------------------
 # Run Targets
@@ -213,6 +335,9 @@ endif
 clean:
 	rm -f $(BUILD_DIR)/*.bin $(BUILD_DIR)/*.hex $(BUILD_DIR)/*.lis
 	rm -f $(BUILD_DIR)/test/*.bin $(BUILD_DIR)/test/*.hex $(BUILD_DIR)/test/*.lis
+	rm -f $(CLIB_BUILD)/**/*.rel $(CLIB_BUILD)/**/*.asm $(CLIB_BUILD)/**/*.lst $(CLIB_BUILD)/**/*.sym
+	rm -f $(BUILD_DIR)/examples/*.rel $(BUILD_DIR)/examples/*.ihx $(BUILD_DIR)/examples/*.hex $(BUILD_DIR)/examples/*.bin
+	rm -f $(BUILD_DIR)/*.lib
 	rm -f $(SRC_DIR)/**/*.lis
 
 distclean:

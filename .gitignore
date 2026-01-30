@@ -1,0 +1,28 @@
+# Build artifacts
+build/
+*.bin
+*.hex
+*.ihx
+*.rel
+*.lst
+*.lis
+*.map
+*.sym
+*.lk
+*.mem
+*.rst
+
+# Backup files
+*.bak
+*.bak2
+*.bak3
+
+# Test files
+test*.asm
+test*.bin
+test*.hex
+
+# OS files
+.DS_Store
+*.swp
+*~

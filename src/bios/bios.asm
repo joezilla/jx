@@ -34,6 +34,10 @@ DMA_HI          EQU     16      ; DMA address high byte
 CR              EQU     0DH
 LF              EQU     0AH
 
+; CCP (Console Command Processor) constants
+CCP_BACKUP      EQU     0E000H  ; Backup location for CCP (high memory)
+CCP_SIZE        EQU     2048    ; 2KB max for CCP
+
 ;========================================================
 ; BIOS Jump Table
 ;========================================================
@@ -99,10 +103,34 @@ BOOT:
         ; Initialize Page Zero
         CALL    INIT_PAGE0
 
-        ; Print ready message and halt
-        LXI     H,MSG_HALT
+        ; Backup CCP to high memory for warm boot reload
+        CALL    BACKUP_CCP
+
+        ; Print ready message
+        LXI     H,MSG_READY
         CALL    PRMSG
-        HLT
+
+        ; Jump to CCP at TPA_BASE
+        JMP     0100H           ; Start CCP
+
+;========================================================
+; DELAY_500MS - Approximately 500ms delay
+; Destroys: A, D, E
+;========================================================
+DELAY_500MS:
+        PUSH    B               ; Save B register
+        LXI     D,0FFFFH        ; Outer loop counter (65535)
+DELAY_OUTER:
+        MVI     A,20H           ; Inner loop counter (32)
+DELAY_INNER:
+        DCR     A               ; Decrement inner counter
+        JNZ     DELAY_INNER     ; Loop until zero
+        DCX     D               ; Decrement outer counter
+        MOV     A,D
+        ORA     E               ; Check if DE = 0
+        JNZ     DELAY_OUTER     ; Continue if not zero
+        POP     B               ; Restore B register
+        RET
 
 ;========================================================
 ; Warm Boot
@@ -111,11 +139,17 @@ WBOOT:
         ; Reinitialize Page Zero vectors
         CALL    INIT_PAGE0
 
-        ; For now, just halt
-        ; TODO: Jump to CCP when implemented
-        LXI     H,MSG_READY
-        CALL    PRMSG
-        HLT
+        ; Reload CCP from backup to TPA
+        CALL    LOAD_CCP
+
+        ; Print newline for clean prompt
+        MVI     C,0DH
+        CALL    CONOUT
+        MVI     C,0AH
+        CALL    CONOUT
+
+        ; Jump to CCP
+        JMP     0100H
 
 ;========================================================
 ; Initialize Page Zero
@@ -139,6 +173,54 @@ INIT_PAGE0:
 
         ; Initialize current disk
         STA     0004H
+
+        RET
+
+;========================================================
+; BACKUP_CCP - Copy CCP from TPA to backup area
+;========================================================
+; Copies CCP_SIZE bytes from 0x0100 to CCP_BACKUP
+; This is called during cold boot to save CCP for warm boot
+; Destroys: A, B, C, D, E, H, L
+;========================================================
+BACKUP_CCP:
+        LXI     H,0100H         ; Source: TPA_BASE (where CCP is loaded)
+        LXI     D,CCP_BACKUP    ; Dest: Backup location
+        LXI     B,CCP_SIZE      ; Count: CCP size
+
+BACKUP_LOOP:
+        MOV     A,M             ; Read byte from source
+        STAX    D               ; Write byte to dest
+        INX     H               ; Increment source
+        INX     D               ; Increment dest
+        DCX     B               ; Decrement count
+        MOV     A,B
+        ORA     C               ; Check if BC = 0
+        JNZ     BACKUP_LOOP
+
+        RET
+
+;========================================================
+; LOAD_CCP - Reload CCP from backup area to TPA
+;========================================================
+; Copies CCP_SIZE bytes from CCP_BACKUP to 0x0100
+; This is called during warm boot to restore CCP
+; Destroys: A, B, C, D, E, H, L
+;========================================================
+LOAD_CCP:
+        LXI     H,CCP_BACKUP    ; Source: CCP backup location
+        LXI     D,0100H         ; Dest: TPA_BASE
+        LXI     B,CCP_SIZE      ; Count: CCP size
+
+LOAD_LOOP:
+        MOV     A,M             ; Read byte from source
+        STAX    D               ; Write byte to dest
+        INX     H               ; Increment source
+        INX     D               ; Increment dest
+        DCX     B               ; Decrement count
+        MOV     A,B
+        ORA     C               ; Check if BC = 0
+        JNZ     LOAD_LOOP
 
         RET
 
