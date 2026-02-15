@@ -236,7 +236,6 @@ DMPLINE:
 
         ; Hex bytes
         MVI     B,16
-        PUSH    H               ; Save for ASCII pass
 DMPH1:
         MOV     A,M
         CALL    PRHEX8
@@ -252,26 +251,6 @@ DMPH2:
         INX     H
         DCR     B
         JNZ     DMPH1
-
-        ; ASCII sidebar
-        MVI     A,' '
-        CALL    PUTCHAR
-        POP     H               ; Restore for ASCII
-        MVI     B,16
-DMPA1:
-        MOV     A,M
-        CPI     20H
-        JC      DMPDOT
-        CPI     7FH
-        JNC     DMPDOT
-        JMP     DMPCH
-DMPDOT:
-        MVI     A,'.'
-DMPCH:
-        CALL    PUTCHAR
-        INX     H
-        DCR     B
-        JNZ     DMPA1
 
         CALL    PRCRLF
         POP     H

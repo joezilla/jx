@@ -129,7 +129,9 @@ PUTCHAR:
         POP     PSW
         PUSH    PSW
         PUSH    H
+        PUSH    B               ; Save BC (V_SCROLL destroys B)
         CALL    V_PUTCH         ; Video output
+        POP     B
         ENDIF
         POP     H
         POP     PSW
