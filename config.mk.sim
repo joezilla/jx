@@ -35,21 +35,21 @@ SIM_FLAGS = -8 -m 00
 #   SIO_DATA=012H  SIO_STATUS=013H  SIO_RX_MASK=02H  SIO_TX_MASK=01H
 #   Bit 1 = RX ready, Bit 0 = TX ready.
 #
-SIO_DATA    = 12H
-SIO_STATUS  = 13H
-SIO_RX_MASK = 02H
-SIO_TX_MASK = 01H
-SIO_8251   = 1
+SIO_DATA    = 01H
+SIO_STATUS  = 00H
+SIO_RX_MASK = 0FFH
+SIO_TX_MASK = 0
+SIO_8251   = 0
 
 # ----------------------------------------------
 # Memory Configuration
 # ----------------------------------------------
-MEM_SIZE = 48
+MEM_SIZE = 64
 
 # Override BIOS_BASE to place monitor at a specific address.
 # Leave blank to auto-derive from MEM_SIZE (top of RAM).
 # Set to 0 for a flat binary loaded at address 0000H.
-BIOS_BASE = 0
+BIOS_BASE =  
 
 # Override STACK_TOP to place the stack at a specific address.
 # Leave blank to auto-compute:
@@ -80,4 +80,3 @@ BIOS_DIR = $(SRC_DIR)/bios
 # ----------------------------------------------
 SYSTEM_BIN = $(BUILD_DIR)/jx.bin
 SYSTEM_HEX = $(BUILD_DIR)/jx.hex
-SYSTEM_DSK = jx.dsk

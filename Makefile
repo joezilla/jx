@@ -1,366 +1,169 @@
-# JX Operating System - Main Makefile
-# ====================================
+# JX Monitor - Makefile
+# =====================
 
-# Include configuration
 include config.mk
 
 # ----------------------------------------------
-# Calculated Addresses Based on Memory Size
+# Memory Layout
 # ----------------------------------------------
-# These are passed to the assembler as defines
+# MEMTOP = top of physical RAM (wraps to 0 for 64KB).
+# BIOS_BASE = ORG address for the monitor.
+#
+# Default: monitor at top of RAM (derived from MEM_SIZE).
+# Override BIOS_BASE in config.mk for custom placement.
 ifeq ($(MEM_SIZE),32)
     MEMTOP    = 08000H
-    BIOS_BASE = 07D00H
-    BDOS_BASE = 07500H
-    TPA_TOP   = 07400H
+    _DEF_BASE = 07400H
 else ifeq ($(MEM_SIZE),48)
     MEMTOP    = 0C000H
-    BIOS_BASE = 0BD00H
-    BDOS_BASE = 0B500H
-    TPA_TOP   = 0B400H
+    _DEF_BASE = 0B400H
 else ifeq ($(MEM_SIZE),64)
     MEMTOP    = 00000H
-    BIOS_BASE = 0FD00H
-    BDOS_BASE = 0F500H
-    TPA_TOP   = 0F400H
+    _DEF_BASE = 0F400H
 else
     $(error Unsupported MEM_SIZE: $(MEM_SIZE). Use 32, 48, or 64)
 endif
 
-# Memory defines passed to assembler
-MEM_DEFINES = -dMEMTOP=$(MEMTOP) -dBIOS_BASE=$(BIOS_BASE) \
-              -dBDOS_BASE=$(BDOS_BASE) -dTPA_TOP=$(TPA_TOP) \
-              -dMEM_SIZE=$(MEM_SIZE)
+# Use explicit BIOS_BASE if set, otherwise derive from MEM_SIZE
+ifeq ($(strip $(BIOS_BASE)),)
+    BIOS_BASE = $(_DEF_BASE)
+endif
+
+# Stack location: below monitor (traditional) or top of RAM (load-at-zero)
+ifeq ($(strip $(STACK_TOP)),)
+    ifeq ($(BIOS_BASE),0)
+        STACK_TOP = $(MEMTOP)
+    else
+        STACK_TOP = $(BIOS_BASE)
+    endif
+endif
+
+# Assembler defines
+MEM_DEFINES = -dBIOS_BASE=$(BIOS_BASE) -dMEM_SIZE=$(MEM_SIZE)
+MEM_DEFINES += -dSTACK_TOP=$(STACK_TOP) -dMEMTOP=$(MEMTOP)
+
+# Serial defines
+HW_DEFINES = -dSIO_DATA=$(SIO_DATA) -dSIO_STATUS=$(SIO_STATUS)
+HW_DEFINES += -dSIO_RX_MASK=$(SIO_RX_MASK) -dSIO_TX_MASK=$(SIO_TX_MASK)
+HW_DEFINES += -dSIO_8251=$(SIO_8251)
+
+# Video defines (always pass VIDEO_BASE so IF/ENDIF works before INCLUDE)
+HW_DEFINES += -dVIDEO_BASE=$(VIDEO_BASE)
+ifneq ($(VIDEO_BASE),0)
+    HW_DEFINES += -dVIDEO_CTRL=$(VIDEO_CTRL)
+    HW_DEFINES += -dVIDEO_COLS=$(VIDEO_COLS)
+    HW_DEFINES += -dVIDEO_ROWS=$(VIDEO_ROWS)
+endif
+
+ALL_DEFINES = $(MEM_DEFINES) $(HW_DEFINES)
+
+# Source files
+BIOS_SRCS = $(wildcard $(BIOS_DIR)/*.asm) \
+            $(wildcard $(SRC_DIR)/lib/*.asm) \
+            $(wildcard $(SRC_DIR)/*.asm)
 
 # ----------------------------------------------
-# File Discovery
+# Targets
 # ----------------------------------------------
-# Find all assembly source files
-BIOS_SRCS = $(wildcard $(BIOS_DIR)/*.asm)
-BDOS_SRCS = $(wildcard $(BDOS_DIR)/*.asm)
-CCP_SRCS  = $(wildcard $(CCP_DIR)/*.asm)
-TEST_SRCS = $(wildcard $(TEST_DIR)/*.asm)
+.PHONY: all hex disk clean distclean run help check-tools info dirs
 
-# Generate output file names
-TEST_BINS = $(patsubst $(TEST_DIR)/%.asm,$(BUILD_DIR)/test/%.bin,$(TEST_SRCS))
-TEST_HEXS = $(patsubst $(TEST_DIR)/%.asm,$(BUILD_DIR)/test/%.hex,$(TEST_SRCS))
-TEST_LSTS = $(patsubst $(TEST_DIR)/%.asm,$(BUILD_DIR)/test/%.lis,$(TEST_SRCS))
+all: dirs check-tools $(SYSTEM_BIN)
+	@echo "Build complete: $(SYSTEM_BIN)"
+	@echo "  Monitor at: $(BIOS_BASE)"
+	@echo "  Stack at:   $(STACK_TOP)"
+	@echo "  Memory:     $(MEM_SIZE)KB"
+	@echo "  Serial:     data=$(SIO_DATA) status=$(SIO_STATUS) rx=$(SIO_RX_MASK) tx=$(SIO_TX_MASK)"
+ifneq ($(VIDEO_BASE),0)
+	@echo "  Video:      $(VIDEO_BASE) ($(VIDEO_COLS)x$(VIDEO_ROWS))"
+endif
 
-# ----------------------------------------------
-# Phony Targets
-# ----------------------------------------------
-.PHONY: all clean distclean dirs test run run-test help check-tools
+hex: dirs check-tools $(SYSTEM_HEX)
+	@echo "Build complete: $(SYSTEM_HEX)"
+	@echo "  Monitor at: $(BIOS_BASE)"
 
-# ----------------------------------------------
-# Default Target
-# ----------------------------------------------
-all: dirs check-tools $(SYSTEM_IMAGE)
-	@echo "Build complete: $(SYSTEM_IMAGE)"
-	@echo "Memory configuration: $(MEM_SIZE)KB"
-	@echo "  BIOS at: $(BIOS_BASE)"
-	@echo "  BDOS at: $(BDOS_BASE)"
-	@echo "  TPA top: $(TPA_TOP)"
-
-# ----------------------------------------------
-# Help
-# ----------------------------------------------
 help:
-	@echo "JX Operating System Build System"
-	@echo "================================="
+	@echo "JX Monitor Build System"
+	@echo "========================"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all          - Build the complete system (default)"
-	@echo "  test         - Build all test programs"
-	@echo "  run          - Run the system in the simulator"
-	@echo "  run-test     - Run a test program (use TEST=name)"
-	@echo "  clean        - Remove build artifacts"
-	@echo "  distclean    - Remove build directory entirely"
-	@echo "  check-tools  - Verify toolchain is available"
-	@echo "  help         - Show this message"
+	@echo "  all        - Build flat binary (default)"
+	@echo "  hex        - Build Intel HEX (for cpmsim)"
+	@echo "  disk       - Build hex and create boot disk image"
+	@echo "  run        - Build hex and run in simulator"
+	@echo "  clean      - Remove build artifacts"
+	@echo "  distclean  - Remove build directory"
+	@echo "  info       - Display configuration"
+	@echo "  help       - Show this message"
 	@echo ""
-	@echo "Configuration:"
-	@echo "  MEM_SIZE=N   - Set memory size (32, 48, 64). Default: 64"
+	@echo "Options:"
+	@echo "  MEM_SIZE=N       - Memory: 32, 48, 64 (default: 64)"
+	@echo "  BIOS_BASE=addr   - Monitor address (0=load at zero)"
+	@echo "  STACK_TOP=addr   - Stack address (default: auto)"
+	@echo "  VIDEO_BASE=addr  - Video address (0=disabled)"
 	@echo ""
-	@echo "Examples:"
-	@echo "  make                      - Build for 64KB"
-	@echo "  make MEM_SIZE=32          - Build for 32KB"
-	@echo "  make test                 - Build test programs"
-	@echo "  make run-test TEST=hello  - Run hello.asm test"
-	@echo ""
-	@echo "Configuration file: config.mk"
+	@echo "Serial presets (override on command line):"
+	@echo "  cpmsim (default): SIO_DATA=01H SIO_STATUS=00H SIO_RX_MASK=0FFH SIO_TX_MASK=0"
+	@echo "  IMSAI SIO:        SIO_DATA=012H SIO_STATUS=013H SIO_RX_MASK=02H SIO_TX_MASK=01H"
 
-# ----------------------------------------------
-# Tool Verification
-# ----------------------------------------------
 check-tools:
 	@if [ ! -x "$(Z80ASM)" ]; then \
 		echo "ERROR: Assembler not found at $(Z80ASM)"; \
-		echo "Please check Z80PACK_DIR in config.mk"; \
+		echo "Check Z80PACK_DIR in config.mk"; \
 		exit 1; \
 	fi
-	@if [ ! -x "$(SIMULATOR)" ]; then \
-		echo "WARNING: Simulator not found at $(SIMULATOR)"; \
-		echo "You can still build, but 'make run' will not work"; \
-	fi
 
-# ----------------------------------------------
-# Directory Creation
-# ----------------------------------------------
-dirs: dirs-clib
+dirs:
 	@mkdir -p $(BUILD_DIR)
-	@mkdir -p $(BUILD_DIR)/test
 
-# ----------------------------------------------
-# Assembly Rules
-# ----------------------------------------------
-# Generic rule for assembling .asm to .bin
-# The assembler outputs files in the source directory, so we move them
+# Build flat binary
+# Note: cd into BIOS_DIR so INCLUDE directives resolve relative to source
+$(SYSTEM_BIN): $(BIOS_SRCS) | dirs
+	@echo "ASM  bios.asm -> $@"
+	@cd $(BIOS_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_BIN) $(ALL_DEFINES) -o$(CURDIR)/$@ bios.asm
 
-# Build individual component
-$(BUILD_DIR)/%.bin: $(SRC_DIR)/%.asm | dirs
-	@echo "ASM  $<"
-	@$(Z80ASM) $(ASM_FLAGS) $(MEM_DEFINES) -o$@ $<
+# Build Intel HEX (for cpmsim -x loading)
+$(SYSTEM_HEX): $(BIOS_SRCS) | dirs
+	@echo "ASM  bios.asm -> $@"
+	@cd $(BIOS_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_HEX) $(ALL_DEFINES) -o$(CURDIR)/$@ bios.asm
 
-# Build test programs (loaded at TPA = 0x0100)
-# Generate both HEX (with load address) and BIN (raw) formats
-$(BUILD_DIR)/test/%.hex: $(TEST_DIR)/%.asm | dirs
-	@echo "ASM  $< -> $@ (Intel HEX)"
-	@$(Z80ASM) $(ASM_FLAGS_HEX) -dTPA_BASE=0100H $(MEM_DEFINES) -o$@ $<
+# Create boot disk image
+disk: hex
+	@echo "DISK $(SYSTEM_HEX) -> $(SYSTEM_DSK)"
+	@node scripts/create-boot-disk.js --8inch -o $(SYSTEM_DSK) $(SYSTEM_HEX)
 
-$(BUILD_DIR)/test/%.bin: $(TEST_DIR)/%.asm | dirs
-	@echo "ASM  $< -> $@ (raw binary)"
-	@$(Z80ASM) $(ASM_FLAGS_BIN) -dTPA_BASE=0100H $(MEM_DEFINES) -o$@ $<
+run: hex
+	@echo "Starting JX Monitor..."
+	@$(SIMULATOR) $(SIM_FLAGS) -x $(SYSTEM_HEX)
 
-# ----------------------------------------------
-# System Image
-# ----------------------------------------------
-# System image with CCP, BDOS, and BIOS
-# Layout: CCP (loaded at 0x0100) + BDOS + BIOS
-$(SYSTEM_IMAGE): $(CCP_BIN) $(BDOS_BIN) $(BIOS_BIN) | dirs
-	@echo "BUILD $(SYSTEM_IMAGE) with CCP"
-	@cat $(CCP_BIN) $(BDOS_BIN) $(BIOS_BIN) > $(SYSTEM_IMAGE)
-	@echo "  CCP:  $(CCP_BIN) ("`ls -lh $(CCP_BIN) | awk '{print $$5}'`")"
-	@echo "  BDOS: $(BDOS_BIN)"
-	@echo "  BIOS: $(BIOS_BIN)"
-
-# ----------------------------------------------
-# Component Targets
-# ----------------------------------------------
-# BIOS targets (explicit rules due to subdirectory structure)
-$(BUILD_DIR)/bios.bin: $(BIOS_DIR)/bios.asm | dirs
-	@echo "ASM  $< -> $@ (raw binary)"
-	@$(Z80ASM) $(ASM_FLAGS_BIN) $(MEM_DEFINES) -o$@ $<
-
-$(BUILD_DIR)/bios.hex: $(BIOS_DIR)/bios.asm | dirs
-	@echo "ASM  $< -> $@ (Intel HEX)"
-	@$(Z80ASM) $(ASM_FLAGS_HEX) $(MEM_DEFINES) -o$@ $<
-
-bios: dirs check-tools $(BIOS_BIN)
-	@echo "BIOS built: $(BIOS_BIN)"
-
-bios-hex: dirs check-tools $(BUILD_DIR)/bios.hex
-	@echo "BIOS built: $(BUILD_DIR)/bios.hex"
-
-# BDOS targets (explicit rules due to subdirectory structure)
-# Note: BDOS needs BIOS_BASE to call BIOS functions
-$(BUILD_DIR)/bdos.bin: $(BDOS_DIR)/bdos.asm | dirs
-	@echo "ASM  $< -> $@ (raw binary)"
-	@$(Z80ASM) $(ASM_FLAGS_BIN) $(MEM_DEFINES) -o$@ $<
-
-$(BUILD_DIR)/bdos.hex: $(BDOS_DIR)/bdos.asm | dirs
-	@echo "ASM  $< -> $@ (Intel HEX)"
-	@$(Z80ASM) $(ASM_FLAGS_HEX) $(MEM_DEFINES) -o$@ $<
-
-bdos: dirs check-tools $(BDOS_BIN)
-	@echo "BDOS built: $(BDOS_BIN)"
-
-# ----------------------------------------------
-# Test Targets
-# ----------------------------------------------
-test: dirs check-tools $(TEST_HEXS) $(TEST_BINS)
-	@echo "Test programs built in $(BUILD_DIR)/test/"
-	@echo "  .hex files - Intel HEX format (use with simulator -x flag)"
-	@echo "  .bin files - Raw binary format"
-
-# Build a specific test (both formats)
-test-%: dirs check-tools $(BUILD_DIR)/test/%.hex $(BUILD_DIR)/test/%.bin
-	@echo "Built test: $*"
-	@echo "  $(BUILD_DIR)/test/$*.hex (Intel HEX)"
-	@echo "  $(BUILD_DIR)/test/$*.bin (raw binary)"
-
-# ----------------------------------------------
-# C Compilation Rules
-# ----------------------------------------------
-# Find C source files in clib
-CLIB_C_SRCS = $(wildcard $(CLIB_DIR)/bdos/*.c) \
-              $(wildcard $(CLIB_DIR)/stdio/*.c) \
-              $(wildcard $(CLIB_DIR)/string/*.c) \
-              $(wildcard $(CLIB_DIR)/stdlib/*.c)
-
-# Generate .rel object file names
-CLIB_OBJS = $(patsubst $(CLIB_DIR)/%.c,$(CLIB_BUILD)/%.rel,$(CLIB_C_SRCS))
-
-# C library archive
-LIBJX = $(BUILD_DIR)/libjx.lib
-
-# crt0 object file
-CRT0_REL = $(CLIB_BUILD)/crt0.rel
-
-# Create clib subdirectories
-dirs-clib:
-	@mkdir -p $(CLIB_BUILD)/bdos $(CLIB_BUILD)/stdio $(CLIB_BUILD)/string $(CLIB_BUILD)/stdlib $(CLIB_BUILD)/crt0
-	@mkdir -p $(BUILD_DIR)/examples
-	@mkdir -p $(BUILD_DIR)/ccp
-
-# Assemble crt0.s to crt0.rel
-$(CRT0_REL): $(CLIB_DIR)/crt0/crt0.s | dirs-clib
-	@echo "AS   $<"
-	@$(SDCC_AS) -plosgff -o $@ $<
-
-# Compile C source to .rel
-$(CLIB_BUILD)/%.rel: $(CLIB_DIR)/%.c | dirs-clib
-	@echo "CC   $<"
-	@$(SDCC) $(SDCC_FLAGS) -I$(CLIB_DIR) -c -o $@ $<
-
-# Build C library archive
-$(LIBJX): $(CLIB_OBJS) | dirs-clib
-	@echo "AR   $@"
-	@rm -f $@
-	@$(SDCC_AR) -rc $@ $(CLIB_OBJS)
-
-# Compile C example programs
-$(BUILD_DIR)/examples/%.rel: $(EXAMPLES_DIR)/%.c | dirs-clib
-	@echo "CC   $<"
-	@$(SDCC) $(SDCC_FLAGS) -I$(CLIB_DIR) -c -o $@ $<
-
-# Link C program to .ihx
-$(BUILD_DIR)/examples/%.ihx: $(BUILD_DIR)/examples/%.rel $(CRT0_REL) $(LIBJX) | dirs-clib
-	@echo "LD   $@"
-	@$(SDCC) $(SDCC_FLAGS) \
-		--code-loc 0x0100 \
-		--data-loc 0x8000 \
-		--no-std-crt0 \
-		-o $@ \
-		$(CRT0_REL) \
-		$(BUILD_DIR)/examples/$*.rel \
-		$(LIBJX)
-
-# Convert .ihx to .hex (Intel HEX format)
-$(BUILD_DIR)/examples/%.hex: $(BUILD_DIR)/examples/%.ihx
-	@echo "HEX  $@"
-	@cp $< $@
-
-# Convert .ihx to .bin (raw binary)
-$(BUILD_DIR)/examples/%.bin: $(BUILD_DIR)/examples/%.ihx
-	@echo "BIN  $@"
-	@objcopy -I ihex -O binary $< $@
-
-# Build all C examples
-examples: dirs-clib $(LIBJX) $(CRT0_REL)
-	@echo "C library and examples ready"
-	@echo "To build an example: make $(BUILD_DIR)/examples/<name>.hex"
-
-# Build and run a C example
-# Usage: make run-example EXAMPLE=hello
-run-example:
-ifndef EXAMPLE
-	@echo "Usage: make run-example EXAMPLE=<name>"
-	@echo "Available examples:"
-	@ls -1 $(EXAMPLES_DIR)/*.c 2>/dev/null | xargs -I {} basename {} .c | sed 's/^/  /' || echo "  (none yet)"
-	@exit 1
-endif
-	@$(MAKE) $(BUILD_DIR)/examples/$(EXAMPLE).hex
-	@echo "Running example: $(EXAMPLE)"
-	@$(SIMULATOR) $(SIM_FLAGS) -x $(BUILD_DIR)/examples/$(EXAMPLE).hex
-
-# ----------------------------------------------
-# CCP Build Rules
-# ----------------------------------------------
-# Compile CCP source
-$(BUILD_DIR)/ccp/ccp.rel: $(CCP_DIR)/ccp.c | dirs-clib
-	@echo "CC   $<"
-	@$(SDCC) $(SDCC_FLAGS) -I$(CLIB_DIR) -c -o $@ $<
-
-# Link CCP to .ihx
-$(BUILD_DIR)/ccp/ccp.ihx: $(BUILD_DIR)/ccp/ccp.rel $(CRT0_REL) $(LIBJX) | dirs-clib
-	@echo "LD   $@"
-	@$(SDCC) $(SDCC_FLAGS) \
-		--code-loc 0x0100 \
-		--data-loc 0x8000 \
-		--no-std-crt0 \
-		-o $@ \
-		$(CRT0_REL) \
-		$(BUILD_DIR)/ccp/ccp.rel \
-		$(LIBJX)
-
-# Convert CCP to .hex format
-$(BUILD_DIR)/ccp/ccp.hex: $(BUILD_DIR)/ccp/ccp.ihx
-	@echo "HEX  $@"
-	@cp $< $@
-
-# Convert CCP to .bin format
-$(BUILD_DIR)/ccp/ccp.bin: $(BUILD_DIR)/ccp/ccp.ihx
-	@echo "BIN  $@"
-	@makebin -p $< $@
-
-# Build CCP
-ccp: dirs-clib $(BUILD_DIR)/ccp/ccp.hex $(BUILD_DIR)/ccp/ccp.bin
-	@echo "CCP built: $(BUILD_DIR)/ccp/ccp.hex"
-
-# ----------------------------------------------
-# Run Targets
-# ----------------------------------------------
-run: all
-	@echo "Starting simulator with $(SYSTEM_IMAGE)..."
-	@$(SIMULATOR) $(SIM_FLAGS) -x $(SYSTEM_IMAGE)
-
-# Run a specific test program
-# Usage: make run-test TEST=hello
-run-test: dirs
-ifndef TEST
-	@echo "Usage: make run-test TEST=<name>"
-	@echo "Available tests:"
-	@ls -1 $(TEST_DIR)/*.asm 2>/dev/null | xargs -I {} basename {} .asm | sed 's/^/  /'
-	@exit 1
-endif
-	@if [ ! -f "$(BUILD_DIR)/test/$(TEST).bin" ]; then \
-		$(MAKE) $(BUILD_DIR)/test/$(TEST).bin; \
-	fi
-	@echo "Running test: $(TEST)"
-	@./scripts/run-test.sh $(TEST)
-
-# ----------------------------------------------
-# Clean Targets
-# ----------------------------------------------
 clean:
 	rm -f $(BUILD_DIR)/*.bin $(BUILD_DIR)/*.hex $(BUILD_DIR)/*.lis
-	rm -f $(BUILD_DIR)/test/*.bin $(BUILD_DIR)/test/*.hex $(BUILD_DIR)/test/*.lis
-	rm -f $(CLIB_BUILD)/**/*.rel $(CLIB_BUILD)/**/*.asm $(CLIB_BUILD)/**/*.lst $(CLIB_BUILD)/**/*.sym
-	rm -f $(BUILD_DIR)/examples/*.rel $(BUILD_DIR)/examples/*.ihx $(BUILD_DIR)/examples/*.hex $(BUILD_DIR)/examples/*.bin
-	rm -f $(BUILD_DIR)/*.lib
+	rm -f $(SYSTEM_DSK)
 	rm -f $(SRC_DIR)/**/*.lis
 
 distclean:
 	rm -rf $(BUILD_DIR)
 
-# ----------------------------------------------
-# Debug Info
-# ----------------------------------------------
 info:
 	@echo "Configuration:"
-	@echo "  Z80PACK_DIR  = $(Z80PACK_DIR)"
-	@echo "  Z80ASM       = $(Z80ASM)"
-	@echo "  SIMULATOR    = $(SIMULATOR)"
-	@echo "  MEM_SIZE     = $(MEM_SIZE)KB"
+	@echo "  Z80PACK_DIR = $(Z80PACK_DIR)"
+	@echo "  Z80ASM      = $(Z80ASM)"
+	@echo "  SIMULATOR   = $(SIMULATOR)"
 	@echo ""
-	@echo "Memory Layout:"
-	@echo "  MEMTOP       = $(MEMTOP)"
-	@echo "  BIOS_BASE    = $(BIOS_BASE)"
-	@echo "  BDOS_BASE    = $(BDOS_BASE)"
-	@echo "  TPA_TOP      = $(TPA_TOP)"
+	@echo "Memory Layout ($(MEM_SIZE)KB):"
+	@echo "  BIOS_BASE   = $(BIOS_BASE)"
+	@echo "  STACK_TOP   = $(STACK_TOP)"
+	@echo "  MEMTOP      = $(MEMTOP)"
 	@echo ""
-	@echo "Sources:"
-	@echo "  BIOS: $(BIOS_SRCS)"
-	@echo "  BDOS: $(BDOS_SRCS)"
-	@echo "  CCP:  $(CCP_SRCS)"
-	@echo "  TEST: $(TEST_SRCS)"
+	@echo "Serial:"
+	@echo "  Data port   = $(SIO_DATA)"
+	@echo "  Status port = $(SIO_STATUS)"
+	@echo "  RX mask     = $(SIO_RX_MASK)"
+	@echo "  TX mask     = $(SIO_TX_MASK)"
+	@echo ""
+	@echo "Video:"
+	@echo "  Video base  = $(VIDEO_BASE)"
+ifneq ($(VIDEO_BASE),0)
+	@echo "  Video size  = $(VIDEO_COLS)x$(VIDEO_ROWS)"
+endif
+	@echo ""
+	@echo "Assembler defines: $(ALL_DEFINES)"

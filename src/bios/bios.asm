@@ -1,594 +1,377 @@
 ;========================================================
-; JX Operating System - BIOS Stub
+; JX Monitor - System Entry Point
 ;========================================================
-; This is a minimal BIOS stub for the cpmsim simulator.
-; It provides the basic BIOS jump table and console I/O.
+; Single flat-binary monitor OS for Intel 8080.
 ;
-; The BIOS is assembled to run at BIOS_BASE, which is
-; set via the -dBIOS_BASE=xxxx assembler flag.
+; Provides:
+;   - Serial I/O (configurable ports)
+;   - VDM-1 video display (optional)
+;   - Dual output: all stdout to both serial and video
+;   - Interactive monitor commands
+;
+; Memory layout depends on BIOS_BASE:
+;
+;   BIOS_BASE > 0 (traditional, top of RAM):
+;     0000-00FF  Page Zero (JMP WBOOT at 0000H)
+;     0100-xxxx  Free RAM
+;     xxxx-FFFF  Monitor OS (~3KB)
+;
+;   BIOS_BASE = 0 (load at zero):
+;     0000-xxxx  Monitor OS (~3KB)
+;     xxxx-FFFF  Free RAM
+;
+; Required assembler defines:
+;   -dBIOS_BASE=xxxx    Monitor load address
+;   -dSTACK_TOP=xxxx    Stack pointer initial value
+;   -dMEMTOP=xxxx       Top of physical RAM
+;   -dMEM_SIZE=xx       Memory size in KB
+;
+; Optional defines:
+;   -dVIDEO_BASE=xxxx   Video framebuffer address
+;   -dVIDEO_COLS=xx     Video columns
+;   -dVIDEO_ROWS=xx     Video rows
 ;========================================================
-
-;--------------------------------------------------------
-; BIOS_BASE and BDOS_BASE are passed via assembler flags
-; Example: -dBIOS_BASE=0FE00H -dBDOS_BASE=0F600H
-;--------------------------------------------------------
 
         ORG     BIOS_BASE
 
-;--------------------------------------------------------
-; I/O Ports (cpmsim specific)
-;--------------------------------------------------------
-CONSTAT         EQU     0       ; Console status port
-CONDATA         EQU     1       ; Console data port
-
-; Disk I/O ports
-FDC_DRIVE       EQU     10      ; Drive select
-FDC_TRACK       EQU     11      ; Track number
-FDC_SECTOR      EQU     12      ; Sector number
-FDC_CMD         EQU     13      ; Command
-FDC_STATUS      EQU     14      ; Status
-DMA_LO          EQU     15      ; DMA address low byte
-DMA_HI          EQU     16      ; DMA address high byte
-
-; ASCII constants
+;========================================================
+; ASCII Constants
+;========================================================
 CR              EQU     0DH
 LF              EQU     0AH
-
-; CCP (Console Command Processor) constants
-CCP_BACKUP      EQU     0E000H  ; Backup location for CCP (high memory)
-CCP_SIZE        EQU     2048    ; 2KB max for CCP
-
-;========================================================
-; BIOS Jump Table
-;========================================================
-; Each entry is exactly 3 bytes (JMP instruction)
-;========================================================
-BIOS_TABLE:
-        JMP     BOOT            ; +00: Cold boot
-        JMP     WBOOT           ; +03: Warm boot
-        JMP     CONST           ; +06: Console status
-        JMP     CONIN           ; +09: Console input
-        JMP     CONOUT          ; +0C: Console output
-        JMP     LIST            ; +0F: List output
-        JMP     PUNCH           ; +12: Punch output
-        JMP     READER          ; +15: Reader input
-        JMP     HOME            ; +18: Home disk
-        JMP     SELDSK          ; +1B: Select disk
-        JMP     SETTRK          ; +1E: Set track
-        JMP     SETSEC          ; +21: Set sector
-        JMP     SETDMA          ; +24: Set DMA address
-        JMP     READ            ; +27: Read sector
-        JMP     WRITE           ; +2A: Write sector
-        JMP     LISTST          ; +2D: List status
-        JMP     SECTRN          ; +30: Sector translate
-
-;========================================================
-; BIOS Variables
-;========================================================
-DISKNO:         DB      0       ; Current disk number
-TRACK:          DW      0       ; Current track
-SECTOR:         DW      0       ; Current sector
-DMAADDR:        DW      0080H   ; Current DMA address
-DETECTED_MEM:   DW      0       ; Detected memory top
 
 ;========================================================
 ; Cold Boot
 ;========================================================
 BOOT:
         DI                      ; Disable interrupts
-        LXI     SP,BIOS_BASE    ; Temporary stack at BIOS base
+        LXI     SP,STACK_TOP    ; Initialize stack pointer
 
-        ; Print boot banner
+        ; Initialize serial port (8251 USART init if SIO_8251=1)
+        CALL    SIO_INIT
+
+        ; Print banner via serial only (video not yet initialized)
         LXI     H,MSG_BANNER
         CALL    PRMSG
 
-        ; Print scanning message
+        ; Detect memory
         LXI     H,MSG_SCAN
         CALL    PRMSG
-
-        ; Detect memory (prints * for each 4KB)
-        CALL    MEMPROBE        ; Returns HL = MEMTOP
-        SHLD    DETECTED_MEM    ; Store for later use
-
-        ; Print newline after progress
+        CALL    MEMPROBE
+        SHLD    DETECTED_MEM
         LXI     H,MSG_CRLF
         CALL    PRMSG
 
-        ; Print memory total
+        ; Print memory size
         CALL    PRMSIZ
+
+        IF VIDEO_BASE
+        ; Initialize video display
+        CALL    V_INIT
+        LXI     H,MSG_VIDEO
+        CALL    PRINTS
+        ENDIF
+
+        ; Set up Page Zero (only when monitor is not at address 0)
+        IF BIOS_BASE
+        CALL    INIT_PAGE0
+        ENDIF
 
         ; Print memory map
         CALL    PRMMAP
 
-        ; Initialize Page Zero
-        CALL    INIT_PAGE0
-
-        ; Backup CCP to high memory for warm boot reload
-        CALL    BACKUP_CCP
-
-        ; Print ready message
+        ; System ready - enter monitor
         LXI     H,MSG_READY
-        CALL    PRMSG
+        CALL    PRINTS
 
-        ; Jump to CCP at TPA_BASE
-        JMP     0100H           ; Start CCP
-
-;========================================================
-; DELAY_500MS - Approximately 500ms delay
-; Destroys: A, D, E
-;========================================================
-DELAY_500MS:
-        PUSH    B               ; Save B register
-        LXI     D,0FFFFH        ; Outer loop counter (65535)
-DELAY_OUTER:
-        MVI     A,20H           ; Inner loop counter (32)
-DELAY_INNER:
-        DCR     A               ; Decrement inner counter
-        JNZ     DELAY_INNER     ; Loop until zero
-        DCX     D               ; Decrement outer counter
-        MOV     A,D
-        ORA     E               ; Check if DE = 0
-        JNZ     DELAY_OUTER     ; Continue if not zero
-        POP     B               ; Restore B register
-        RET
+        JMP     MONITOR
 
 ;========================================================
-; Warm Boot
+; Warm Boot (re-enter monitor)
 ;========================================================
 WBOOT:
-        ; Reinitialize Page Zero vectors
+        LXI     SP,STACK_TOP
+        IF BIOS_BASE
         CALL    INIT_PAGE0
-
-        ; Reload CCP from backup to TPA
-        CALL    LOAD_CCP
-
-        ; Print newline for clean prompt
-        MVI     C,0DH
-        CALL    CONOUT
-        MVI     C,0AH
-        CALL    CONOUT
-
-        ; Jump to CCP
-        JMP     0100H
+        ENDIF
+        CALL    PRCRLF
+        JMP     MONITOR
 
 ;========================================================
 ; Initialize Page Zero
 ;========================================================
+; Sets JMP WBOOT at 0000H so programs can return to
+; monitor via JMP 0000H.
+; Only assembled when BIOS_BASE > 0.
+;========================================================
+        IF BIOS_BASE
 INIT_PAGE0:
-        ; Set warm boot vector at 0x0000
-        MVI     A,0C3H          ; JMP instruction
+        MVI     A,0C3H          ; JMP opcode
         STA     0000H
         LXI     H,WBOOT
         SHLD    0001H
+        RET
+        ENDIF
 
-        ; Set BDOS entry vector at 0x0005
-        MVI     A,0C3H          ; JMP instruction
-        STA     0005H
-        LXI     H,BDOS_BASE
-        SHLD    0006H
-
-        ; Initialize I/O byte
-        XRA     A
-        STA     0003H
-
-        ; Initialize current disk
-        STA     0004H
-
+;========================================================
+; PUTCHAR - Dual output (serial + video)
+;========================================================
+; Input:  A = character to output
+; Destroys: C (serial uses C for CONOUT)
+;========================================================
+PUTCHAR:
+        PUSH    PSW
+        PUSH    H               ; Save HL (V_PUTCH destroys it)
+        MOV     C,A
+        CALL    CONOUT          ; Serial output
+        IF VIDEO_BASE
+        POP     H
+        POP     PSW
+        PUSH    PSW
+        PUSH    H
+        CALL    V_PUTCH         ; Video output
+        ENDIF
+        POP     H
+        POP     PSW
         RET
 
 ;========================================================
-; BACKUP_CCP - Copy CCP from TPA to backup area
+; GETCHAR - Read from serial (keyboard)
 ;========================================================
-; Copies CCP_SIZE bytes from 0x0100 to CCP_BACKUP
-; This is called during cold boot to save CCP for warm boot
-; Destroys: A, B, C, D, E, H, L
+; Output: A = character
 ;========================================================
-BACKUP_CCP:
-        LXI     H,0100H         ; Source: TPA_BASE (where CCP is loaded)
-        LXI     D,CCP_BACKUP    ; Dest: Backup location
-        LXI     B,CCP_SIZE      ; Count: CCP size
-
-BACKUP_LOOP:
-        MOV     A,M             ; Read byte from source
-        STAX    D               ; Write byte to dest
-        INX     H               ; Increment source
-        INX     D               ; Increment dest
-        DCX     B               ; Decrement count
-        MOV     A,B
-        ORA     C               ; Check if BC = 0
-        JNZ     BACKUP_LOOP
-
+GETCHAR:
+        CALL    CONIN
         RET
 
 ;========================================================
-; LOAD_CCP - Reload CCP from backup area to TPA
+; MEMPROBE - Detect top of RAM
 ;========================================================
-; Copies CCP_SIZE bytes from CCP_BACKUP to 0x0100
-; This is called during warm boot to restore CCP
-; Destroys: A, B, C, D, E, H, L
-;========================================================
-LOAD_CCP:
-        LXI     H,CCP_BACKUP    ; Source: CCP backup location
-        LXI     D,0100H         ; Dest: TPA_BASE
-        LXI     B,CCP_SIZE      ; Count: CCP size
-
-LOAD_LOOP:
-        MOV     A,M             ; Read byte from source
-        STAX    D               ; Write byte to dest
-        INX     H               ; Increment source
-        INX     D               ; Increment dest
-        DCX     B               ; Decrement count
-        MOV     A,B
-        ORA     C               ; Check if BC = 0
-        JNZ     LOAD_LOOP
-
-        RET
-
-;========================================================
-; MEMPROBE - Detect top of RAM with progress display
+; Probes upward in 256-byte pages.
+; Prints '*' for each 4KB found.
 ; Output: HL = first invalid address (MEMTOP)
-; Prints '*' for each 4KB tested
-; Destroys: A, B, C, HL
+; Destroys: A, B, C, H, L
 ;========================================================
 MEMPROBE:
-        LXI     H,08000H        ; Start at 32KB (minimum)
-        MVI     C,0             ; Page counter (for 4KB = 16 pages)
+        IF BIOS_BASE
+        ; Traditional layout: probe from 32KB upward
+        LXI     H,08000H
+        ELSE
+        ; Load-at-zero: probe from first page after monitor code
+        LXI     H,CODE_END
+        MOV     A,L
+        ORA     A
+        JZ      MPR_AL          ; Already page-aligned
+        INR     H               ; Round up to next 256-byte page
+        MVI     L,0
+MPR_AL:
+        ENDIF
+        MVI     C,0             ; Page counter
 MPRBLP:
         MOV     A,H
         ORA     A               ; H=0 means wrapped past 64KB
         JZ      MPRBDN
 
         MOV     A,M             ; Read current value
-        MOV     B,A             ; Save it in B
-        CMA                     ; Complement A
+        MOV     B,A             ; Save
+        CMA                     ; Complement
         MOV     M,A             ; Write complement
-        CMP     M               ; Read back - match?
-        MOV     M,B             ; Restore original value
-        JNZ     MPRBDN          ; No match = no RAM here
+        CMP     M               ; Read back
+        MOV     M,B             ; Restore original
+        JNZ     MPRBDN          ; No match = no RAM
 
-        ; Check if we should print progress (every 16 pages = 4KB)
-        INR     C               ; Increment page counter
+        ; Progress: '*' every 4KB (16 pages)
+        INR     C
         MOV     A,C
-        ANI     0FH             ; Mask to lower 4 bits
-        JNZ     MPRNXT          ; Not at 4KB boundary yet
-        ; Print progress marker
-        MVI     A,'*'
-        OUT     CONDATA
+        ANI     0FH
+        JNZ     MPRNXT
+        PUSH    B
+        MVI     C,'*'
+        CALL    CONOUT          ; Serial only (video may not be init)
+        POP     B
+        MVI     C,0
 
 MPRNXT:
         INR     H               ; Next 256-byte page
         JMP     MPRBLP
 
 MPRBDN:
-        RET                     ; HL = MEMTOP
+        RET
 
 ;========================================================
 ; PRMSIZ - Print detected memory size
-; Input: DETECTED_MEM contains MEMTOP
-; Destroys: A, B, C, D, E, H, L
 ;========================================================
 PRMSIZ:
-        LXI     H,MSG_MEMORY    ; "Memory: "
+        LXI     H,MSG_MEMORY
         CALL    PRMSG
 
-        LHLD    DETECTED_MEM    ; Get MEMTOP
-        ; Convert to KB: divide by 1024 (shift right 10 bits)
-        ; Since H already contains high byte, H = MEMTOP/256
-        ; Divide H by 4 to get KB
+        LHLD    DETECTED_MEM
         MOV     A,H
-        ORA     A               ; Check for 64KB (H=0 means 256 pages = 64KB)
-        JNZ     NOT_64K
-        MVI     A,64            ; Special case: 64KB
-        JMP     PRINT_KB
-NOT_64K:
-        RRC                     ; Divide by 2
-        RRC                     ; Divide by 4 = KB
-        ANI     03FH            ; Mask to 6 bits (max 63)
-PRINT_KB:
-        ; A now contains KB value (32-64)
-        CALL    PRDEC   ; Print A as decimal
-
-        LXI     H,MSG_KB        ; "KB"
+        ORA     A
+        JNZ     PMSZ1
+        MVI     A,64
+        JMP     PMSZ2
+PMSZ1:
+        RRC
+        RRC
+        ANI     03FH
+PMSZ2:
+        CALL    PRDEC
+        LXI     H,MSG_KB
         CALL    PRMSG
         RET
 
 ;========================================================
-; PRMMAP - Display memory allocation map
-; Shows: 0000-xxxx TPA, xxxx-xxxx BDOS, xxxx-FFFF BIOS
+; PRMMAP - Print memory map
+;========================================================
+; Dynamically prints addresses based on build configuration.
 ;========================================================
 PRMMAP:
-        ; Print TPA line: 0000-BDOS_BASE-1 TPA
-        LXI     H,MSG_MAP0
-        CALL    PRMSG
-        LXI     H,BDOS_BASE-1   ; End of TPA
-        CALL    PRADDR
-        LXI     H,MSG_TPA
-        CALL    PRMSG
+        IF BIOS_BASE
+        ; Traditional layout: Page Zero, Free RAM, [Video], Monitor
+        LXI     H,MSG_MAP_PZ
+        CALL    PRINTS
 
-        ; Print BDOS line: BDOS_BASE-BIOS_BASE-1 BDOS
-        LXI     H,MSG_MAP1
-        CALL    PRMSG
-        LXI     H,BDOS_BASE
-        CALL    PRADDR
+        ; Free RAM: 0100-<BIOS_BASE-1>
+        LXI     H,MSG_MAP_2SP
+        CALL    PRINTS
+        LXI     H,0100H
+        CALL    PRHEX16
         MVI     A,'-'
-        OUT     CONDATA
-        LXI     H,BIOS_BASE-1   ; End of BDOS
-        CALL    PRADDR
-        LXI     H,MSG_BDOS
-        CALL    PRMSG
+        CALL    PUTCHAR
+        LXI     H,BIOS_BASE-1
+        CALL    PRHEX16
+        LXI     H,MSG_MAP_RAM
+        CALL    PRINTS
 
-        ; Print BIOS line: BIOS_BASE-FFFF BIOS
-        LXI     H,MSG_MAP1
-        CALL    PRMSG
+        ELSE
+        ; Load-at-zero: Monitor, Free RAM, [Video]
+
+        ; Monitor: 0000-<CODE_END-1>
+        LXI     H,MSG_MAP_2SP
+        CALL    PRINTS
+        LXI     H,0000H
+        CALL    PRHEX16
+        MVI     A,'-'
+        CALL    PUTCHAR
+        LXI     H,CODE_END-1
+        CALL    PRHEX16
+        LXI     H,MSG_MAP_MON
+        CALL    PRINTS
+
+        ; Free RAM: <CODE_END>-<top>
+        LXI     H,MSG_MAP_2SP
+        CALL    PRINTS
+        LXI     H,CODE_END
+        CALL    PRHEX16
+        MVI     A,'-'
+        CALL    PUTCHAR
+        LXI     H,MEMTOP-1
+        CALL    PRHEX16
+        LXI     H,MSG_MAP_RAM
+        CALL    PRINTS
+
+        ENDIF
+
+        IF VIDEO_BASE
+        LXI     H,MSG_MAP_2SP
+        CALL    PRINTS
+        LXI     H,VIDEO_BASE
+        CALL    PRHEX16
+        MVI     A,'-'
+        CALL    PUTCHAR
+        LXI     H,VIDEO_BASE+VIDEO_SIZE-1
+        CALL    PRHEX16
+        LXI     H,MSG_MAP_VID
+        CALL    PRINTS
+        ENDIF
+
+        IF BIOS_BASE
+        ; Monitor line (traditional layout)
+        LXI     H,MSG_MAP_2SP
+        CALL    PRINTS
         LXI     H,BIOS_BASE
-        CALL    PRADDR
+        CALL    PRHEX16
         MVI     A,'-'
-        OUT     CONDATA
-        LXI     H,0FFFFH
-        CALL    PRADDR
-        LXI     H,MSG_BIOS
-        CALL    PRMSG
-        RET
-
-;========================================================
-; PRADDR - Print HL as 4-digit hex address
-; Input: HL = address to print
-; Destroys: A
-;========================================================
-PRADDR:
-        MOV     A,H
-        CALL    PRHEX
-        MOV     A,L
-        CALL    PRHEX
-        RET
-
-;========================================================
-; PRHEX - Print A as 2-digit hex
-; Input: A = byte to print
-; Destroys: A
-;========================================================
-PRHEX:
-        PUSH    PSW             ; Save original
-        RRC                     ; Shift high nibble
-        RRC
-        RRC
-        RRC
-        CALL    PRNIB           ; Print high nibble
-        POP     PSW             ; Restore
-        CALL    PRNIB           ; Print low nibble
-        RET
-
-;========================================================
-; PRNIB - Print low nibble of A as hex digit
-; Input: A = value (low 4 bits used)
-; Destroys: A
-;========================================================
-PRNIB:
-        ANI     0FH             ; Mask to low nibble
-        CPI     10
-        JC      PRNIB1          ; 0-9
-        ADI     'A'-10          ; A-F
-        JMP     PRNIB2
-PRNIB1:
-        ADI     '0'             ; 0-9
-PRNIB2:
-        OUT     CONDATA
-        RET
-
-;========================================================
-; PRDEC - Print A register as decimal (0-99)
-; Input: A = number to print
-; Destroys: A, B
-;========================================================
-PRDEC:
-        MVI     B,0             ; Tens counter
-TENS_LOOP:
-        CPI     10
-        JC      PRINT_TENS      ; Less than 10, done counting
-        SUI     10              ; Subtract 10
-        INR     B               ; Increment tens
-        JMP     TENS_LOOP
-PRINT_TENS:
-        PUSH    PSW             ; Save ones digit
-        MOV     A,B
-        ORA     A               ; Is tens zero?
-        JZ      SKIP_TENS       ; Skip leading zero
-        ADI     '0'             ; Convert to ASCII
-        OUT     CONDATA
-SKIP_TENS:
-        POP     PSW             ; Restore ones digit
-        ADI     '0'             ; Convert to ASCII
-        OUT     CONDATA
-        RET
-
-;========================================================
-; Console Status
-; Returns: A = 0 if no char ready, FF if ready
-;========================================================
-CONST:
-        IN      CONSTAT
-        RET
-
-;========================================================
-; Console Input
-; Returns: A = character read
-;========================================================
-CONIN:
-        IN      CONSTAT         ; Check status
-        ORA     A
-        JZ      CONIN           ; Wait for character
-        IN      CONDATA         ; Read character
-        RET
-
-;========================================================
-; Console Output
-; Input: C = character to output
-;========================================================
-CONOUT:
-        MOV     A,C
-        OUT     CONDATA
-        RET
-
-;========================================================
-; List Device Output (stub)
-;========================================================
-LIST:
-        MOV     A,C
-        OUT     CONDATA         ; Send to console as fallback
-        RET
-
-;========================================================
-; Punch Device Output (stub)
-;========================================================
-PUNCH:
-        RET
-
-;========================================================
-; Reader Device Input (stub)
-;========================================================
-READER:
-        MVI     A,1AH           ; Return EOF (Ctrl-Z)
-        RET
-
-;========================================================
-; List Device Status (stub)
-;========================================================
-LISTST:
-        MVI     A,0FFH          ; Always ready
-        RET
-
-;========================================================
-; Home Disk Head
-;========================================================
-HOME:
-        LXI     H,0
-        SHLD    TRACK
-        RET
-
-;========================================================
-; Select Disk
-; Input: C = disk number (0=A, 1=B, ...)
-; Output: HL = DPH address, or 0 if invalid
-;========================================================
-SELDSK:
-        MOV     A,C
-        CPI     1               ; Only drive A supported
-        JNC     SELDSK_BAD
-        STA     DISKNO
-        OUT     FDC_DRIVE
-        LXI     H,DPH0          ; Return DPH for drive A
-        RET
-SELDSK_BAD:
-        LXI     H,0             ; Invalid drive
-        RET
-
-;========================================================
-; Set Track
-; Input: BC = track number
-;========================================================
-SETTRK:
-        MOV     H,B
-        MOV     L,C
-        SHLD    TRACK
-        RET
-
-;========================================================
-; Set Sector
-; Input: BC = sector number
-;========================================================
-SETSEC:
-        MOV     H,B
-        MOV     L,C
-        SHLD    SECTOR
-        RET
-
-;========================================================
-; Set DMA Address
-; Input: BC = DMA address
-;========================================================
-SETDMA:
-        MOV     H,B
-        MOV     L,C
-        SHLD    DMAADDR
-        RET
-
-;========================================================
-; Read Sector
-; Output: A = 0 on success, 1 on error
-;========================================================
-READ:
-        CALL    SETUP_DISK
-        XRA     A               ; Read command = 0
-        OUT     FDC_CMD
-        IN      FDC_STATUS
-        RET
-
-;========================================================
-; Write Sector
-; Output: A = 0 on success, 1 on error
-;========================================================
-WRITE:
-        CALL    SETUP_DISK
-        MVI     A,1             ; Write command = 1
-        OUT     FDC_CMD
-        IN      FDC_STATUS
-        RET
-
-;========================================================
-; Setup Disk I/O Ports
-;========================================================
-SETUP_DISK:
-        LHLD    TRACK
-        MOV     A,L
-        OUT     FDC_TRACK
-
-        LHLD    SECTOR
-        MOV     A,L
-        OUT     FDC_SECTOR
-
-        LHLD    DMAADDR
-        MOV     A,L
-        OUT     DMA_LO
-        MOV     A,H
-        OUT     DMA_HI
+        CALL    PUTCHAR
+        LXI     H,CODE_END-1
+        CALL    PRHEX16
+        LXI     H,MSG_MAP_MON
+        CALL    PRINTS
+        ENDIF
 
         RET
 
 ;========================================================
-; Sector Translate
-; Input: BC = logical sector, DE = translate table addr
-; Output: HL = physical sector
+; PRMSG - Print null-terminated string via serial only
 ;========================================================
-SECTRN:
-        MOV     H,B             ; No translation
-        MOV     L,C
-        RET
-
-;========================================================
-; Print Message (null-terminated)
-; Input: HL = message address
+; Used during early boot before video is initialized.
+; After boot, use PRINTS (which goes through PUTCHAR).
 ;========================================================
 PRMSG:
         MOV     A,M
         ORA     A
         RZ
-        OUT     CONDATA
+        MOV     C,A
+        CALL    CONOUT
         INX     H
         JMP     PRMSG
 
 ;========================================================
-; Messages
+; PRDEC - Print A as decimal (0-99)
+;========================================================
+; Simple decimal for boot messages (memory KB).
+;========================================================
+PRDEC:
+        MVI     B,0
+PRDT:
+        CPI     10
+        JC      PRDT2
+        SUI     10
+        INR     B
+        JMP     PRDT
+PRDT2:
+        PUSH    PSW
+        MOV     A,B
+        ORA     A
+        JZ      PRDT3
+        ADI     '0'
+        MOV     C,A
+        CALL    CONOUT
+PRDT3:
+        POP     PSW
+        ADI     '0'
+        MOV     C,A
+        CALL    CONOUT
+        RET
+
+;========================================================
+; BIOS Variables
+;========================================================
+DETECTED_MEM:   DW      0       ; Detected memory top
+
+;========================================================
+; Include sub-modules
+;========================================================
+        INCLUDE serial.asm
+        INCLUDE video.asm
+        INCLUDE ../lib/print.asm
+        INCLUDE ../lib/string.asm
+        INCLUDE ../monitor.asm
+
+;========================================================
+; Boot Messages
 ;========================================================
 MSG_BANNER:
         DB      CR,LF
-        DB      'JX/8080. Version 0.1. (C) 2025 MrEppot'
-        DB      CR,LF,LF,0
+        DB      'JX/8080 Monitor v0.3'
+        DB      CR,LF,0
 
 MSG_MEMORY:
         DB      'Memory: ',0
 
 MSG_KB:
-        DB      'KB',CR,LF,LF,0
+        DB      'KB',CR,LF,0
 
 MSG_SCAN:
         DB      'Scanning: ',0
@@ -596,60 +379,36 @@ MSG_SCAN:
 MSG_CRLF:
         DB      CR,LF,0
 
-MSG_MAP0:
-        DB      '  0000-',0
-
-MSG_MAP1:
-        DB      '  ',0
-
-MSG_TPA:
-        DB      '  TPA',CR,LF,0
-
-MSG_BDOS:
-        DB      '  BDOS',CR,LF,0
-
-MSG_BIOS:
-        DB      '  BIOS',CR,LF,0
-
-MSG_HALT:
-        DB      CR,LF
-        DB      'System halted.',CR,LF,0
-
 MSG_READY:
-        DB      CR,LF
-        DB      'System ready.',CR,LF,0
+        DB      CR,LF,'Type ? for help.',CR,LF,0
+
+        IF VIDEO_BASE
+MSG_VIDEO:
+        DB      'Video: VDM-1 64x16 at C000',CR,LF,0
+        ENDIF
+
+; Memory map fragments (addresses printed dynamically)
+        IF BIOS_BASE
+MSG_MAP_PZ:
+        DB      '  0000-00FF  Page Zero',CR,LF,0
+        ENDIF
+MSG_MAP_2SP:
+        DB      '  ',0
+MSG_MAP_RAM:
+        DB      '  Free RAM',CR,LF,0
+MSG_MAP_MON:
+        DB      '  Monitor',CR,LF,0
+        IF VIDEO_BASE
+MSG_MAP_VID:
+        DB      '  Video',CR,LF,0
+        ENDIF
 
 ;========================================================
-; Disk Parameter Header (DPH) for Drive A
+; CODE_END - marks the end of all monitor code and data.
+; Used to compute free RAM boundaries when BIOS_BASE=0.
 ;========================================================
-DPH0:
-        DW      0               ; XLT - no translation
-        DW      0,0,0           ; Scratch area
-        DW      DIRBUF          ; Directory buffer
-        DW      DPB0            ; Disk Parameter Block
-        DW      0               ; CSV - no checksum
-        DW      ALV0            ; Allocation vector
-
-;========================================================
-; Disk Parameter Block (DPB) for 8" SSSD
-;========================================================
-DPB0:
-        DW      26              ; SPT - sectors per track
-        DB      3               ; BSH - block shift (1K blocks)
-        DB      7               ; BLM - block mask
-        DB      0               ; EXM - extent mask
-        DW      242             ; DSM - total blocks - 1
-        DW      63              ; DRM - directory entries - 1
-        DB      0C0H            ; AL0 - allocation bitmap
-        DB      0               ; AL1
-        DW      16              ; CKS - checksum vector size
-        DW      2               ; OFF - reserved tracks
-
-;========================================================
-; Disk Buffers
-;========================================================
-DIRBUF: DS      128             ; Directory buffer
-ALV0:   DS      32              ; Allocation vector
+CODE_END:
 
 ;========================================================
         END
+;========================================================

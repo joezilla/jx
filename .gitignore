@@ -2,6 +2,7 @@
 build/
 *.bin
 *.hex
+*.dsk
 *.ihx
 *.rel
 *.lst
