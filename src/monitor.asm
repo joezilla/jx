@@ -271,6 +271,7 @@ DO_TEST:
         JC      TST_ERR
         XCHG
         SHLD    TST_SADR
+        XCHG                    ; HL = string pointer for end addr
 
         CALL    SKIPSP
         CALL    PRHX_IN
@@ -401,6 +402,7 @@ DO_WRITE:
         JC      WRT_ERR
         XCHG
         SHLD    WRT_ADDR
+        XCHG                    ; HL = string pointer for parsing bytes
 
 WRT_LP:
         CALL    SKIPSP
