@@ -1,0 +1,22 @@
+#!/usr/bin/expect -f
+#========================================================
+# Test: Error handling for unknown/bad commands
+#========================================================
+
+source [file dirname [info script]]/harness.exp
+
+boot
+
+# Unknown command
+set output [capture_until_prompt "xyz"]
+assert_contains $output "? " "Unknown command echoed with ?"
+
+# g with no args
+set output [capture_until_prompt "g"]
+assert_contains $output "Usage: g" "g with no args shows usage"
+
+# t with bad hex
+set output [capture_until_prompt "t zzz"]
+assert_contains $output "Usage: t" "t with bad hex shows usage"
+
+cleanup

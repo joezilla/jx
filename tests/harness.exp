@@ -1,0 +1,223 @@
+#!/usr/bin/expect -f
+#========================================================
+# JX Monitor Test Harness - Shared Library
+#========================================================
+# Source this from test scripts:
+#   source [file dirname [info script]]/harness.exp
+#
+# Provides:
+#   boot           - Spawn cpmsim, wait for prompt
+#   send_cmd       - Send command + CR
+#   expect_prompt  - Wait for "> " prompt
+#   capture_until_prompt - Capture output until prompt
+#   assert_contains - Check buffer contains pattern
+#   assert_eq      - Check exact equality
+#   pass / fail    - Record result
+#   hard_fail      - Record failure + exit
+#   cleanup        - Kill cpmsim + print summary
+#========================================================
+
+package require Tcl 8.5
+
+# --- Configuration ---
+set script_dir [file dirname [info script]]
+set project_dir [file normalize "$script_dir/.."]
+set hex_file "$project_dir/build/jx.hex"
+
+# Parse Z80PACK_DIR from config.mk.sim
+set config_file "$project_dir/config.mk.sim"
+set z80pack_dir ""
+set fp [open $config_file r]
+while {[gets $fp line] >= 0} {
+    if {[regexp {^Z80PACK_DIR\s*=\s*(\S+)} $line -> val]} {
+        set z80pack_dir $val
+    }
+}
+close $fp
+
+if {$z80pack_dir eq ""} {
+    puts "ERROR: Could not find Z80PACK_DIR in $config_file"
+    exit 1
+}
+
+# Resolve relative path from project dir
+if {[string index $z80pack_dir 0] ne "/"} {
+    set z80pack_dir [file normalize "$project_dir/$z80pack_dir"]
+}
+set cpmsim "$z80pack_dir/cpmsim/cpmsim"
+
+# --- Timeouts ---
+set boot_timeout 10
+set cmd_timeout 5
+
+# --- Counters ---
+set pass_count 0
+set fail_count 0
+set test_name ""
+
+# --- Logging ---
+log_user 0
+
+#========================================================
+# boot - Spawn cpmsim with JX monitor hex
+#========================================================
+# Sets global: boot_output, spawn_id
+#========================================================
+proc boot {} {
+    global cpmsim hex_file boot_timeout spawn_id boot_output project_dir
+
+    if {![file exists $hex_file]} {
+        hard_fail "Hex file not found: $hex_file"
+    }
+
+    if {![file executable $cpmsim]} {
+        hard_fail "cpmsim not found or not executable: $cpmsim"
+    }
+
+    # cpmsim requires being run from its own directory
+    set cpmsim_dir [file dirname $cpmsim]
+    cd $cpmsim_dir
+
+    spawn $cpmsim -8 -m 00 -x $hex_file
+
+    set boot_output ""
+    set timeout $boot_timeout
+    expect {
+        -re {> $} {
+            set boot_output $expect_out(buffer)
+        }
+        timeout {
+            hard_fail "Timeout waiting for boot prompt"
+        }
+        eof {
+            hard_fail "cpmsim exited during boot"
+        }
+    }
+
+    # Return to project dir
+    cd $project_dir
+}
+
+#========================================================
+# send_cmd - Send a command string followed by CR
+#========================================================
+proc send_cmd {cmd} {
+    send -- "$cmd\r"
+}
+
+#========================================================
+# expect_prompt - Wait for the "> " prompt
+#========================================================
+# Returns: everything captured before the prompt
+#========================================================
+proc expect_prompt {} {
+    global cmd_timeout
+    set timeout $cmd_timeout
+    expect {
+        -re {> $} {
+            return $expect_out(buffer)
+        }
+        timeout {
+            fail "Timeout waiting for prompt"
+            return ""
+        }
+        eof {
+            fail "cpmsim exited unexpectedly"
+            return ""
+        }
+    }
+}
+
+#========================================================
+# capture_until_prompt - Send cmd and capture output
+#========================================================
+# Returns: full output buffer (including echo)
+#========================================================
+proc capture_until_prompt {cmd} {
+    send_cmd $cmd
+    return [expect_prompt]
+}
+
+#========================================================
+# assert_contains - Check if buffer contains pattern
+#========================================================
+# Uses glob-style matching with * wildcards
+#========================================================
+proc assert_contains {buf pattern desc} {
+    if {[string match "*$pattern*" $buf]} {
+        pass $desc
+    } else {
+        fail "$desc (expected '$pattern' not found)"
+    }
+}
+
+#========================================================
+# assert_not_contains - Check buffer does not contain pattern
+#========================================================
+proc assert_not_contains {buf pattern desc} {
+    if {[string match "*$pattern*" $buf]} {
+        fail "$desc (unexpected '$pattern' found)"
+    } else {
+        pass $desc
+    }
+}
+
+#========================================================
+# assert_eq - Check exact equality
+#========================================================
+proc assert_eq {actual expected desc} {
+    if {$actual eq $expected} {
+        pass $desc
+    } else {
+        fail "$desc (got '$actual', expected '$expected')"
+    }
+}
+
+#========================================================
+# pass - Record a passing test
+#========================================================
+proc pass {desc} {
+    global pass_count
+    incr pass_count
+    puts "  ok: $desc"
+}
+
+#========================================================
+# fail - Record a failing test
+#========================================================
+proc fail {desc} {
+    global fail_count
+    incr fail_count
+    puts "  FAIL: $desc"
+}
+
+#========================================================
+# hard_fail - Record failure + cleanup + exit
+#========================================================
+proc hard_fail {desc} {
+    global fail_count
+    incr fail_count
+    puts "  FAIL: $desc"
+    cleanup
+}
+
+#========================================================
+# cleanup - Kill cpmsim and print summary, exit
+#========================================================
+proc cleanup {} {
+    global spawn_id pass_count fail_count
+
+    # Kill cpmsim if running
+    catch {
+        close -i $spawn_id
+        wait -i $spawn_id
+    }
+
+    set total [expr {$pass_count + $fail_count}]
+    puts "  --- $pass_count/$total passed ---"
+
+    if {$fail_count > 0} {
+        exit 1
+    }
+    exit 0
+}

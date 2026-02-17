@@ -41,6 +41,17 @@ SIO_RX_MASK = 0FFH
 SIO_TX_MASK = 0
 SIO_8251   = 0
 
+# SIO Channel B (disabled for simulator)
+SIO2_DATA    = 0
+SIO2_STATUS  = 0
+SIO2_RX_MASK = 0
+
+# ----------------------------------------------
+# Version
+# ----------------------------------------------
+VER_MAJOR = 0
+VER_MINOR = 4
+
 # ----------------------------------------------
 # Memory Configuration
 # ----------------------------------------------
@@ -49,7 +60,7 @@ MEM_SIZE = 64
 # Override BIOS_BASE to place monitor at a specific address.
 # Leave blank to auto-derive from MEM_SIZE (top of RAM).
 # Set to 0 for a flat binary loaded at address 0000H.
-BIOS_BASE =  
+BIOS_BASE = 0
 
 # Override STACK_TOP to place the stack at a specific address.
 # Leave blank to auto-compute:
@@ -63,7 +74,7 @@ STACK_TOP =
 # Processor Technology VDM-1
 # 64 columns x 16 rows at C000H
 # Set VIDEO_BASE=0 to disable video support
-VIDEO_BASE = 0CC00H
+VIDEO_BASE = 0
 VIDEO_CTRL = 0C8H
 VIDEO_COLS = 64
 VIDEO_ROWS = 16

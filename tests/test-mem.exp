@@ -1,0 +1,17 @@
+#!/usr/bin/expect -f
+#========================================================
+# Test: m command (memory layout)
+#========================================================
+
+source [file dirname [info script]]/harness.exp
+
+boot
+
+set output [capture_until_prompt "m"]
+assert_contains $output "Memory Layout:" "m shows layout header"
+assert_contains $output "Total:" "m shows total"
+assert_contains $output "KB" "m shows KB"
+assert_contains $output "Free:" "m shows free range"
+assert_contains $output "(RAM)" "m shows RAM label"
+
+cleanup

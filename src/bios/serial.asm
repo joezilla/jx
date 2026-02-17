@@ -38,6 +38,21 @@ SIO_TX_MASK     EQU     0
 SIO_8251        EQU     0
         ENDIF
 
+;--------------------------------------------------------
+; SIO Channel B defaults (overridden by -d flags)
+;--------------------------------------------------------
+        IFNDEF SIO2_DATA
+SIO2_DATA       EQU     0
+        ENDIF
+
+        IFNDEF SIO2_STATUS
+SIO2_STATUS     EQU     0
+        ENDIF
+
+        IFNDEF SIO2_RX_MASK
+SIO2_RX_MASK    EQU     0
+        ENDIF
+
 ;========================================================
 ; CONST - Check if character available
 ;========================================================
@@ -117,6 +132,29 @@ SIO_INIT:
         ;   TxEN=1, DTR=1, RxEN=1, SBRK=0, ER=1, RTS=1
         MVI     A,37H
         OUT     SIO_STATUS
+        ENDIF
+        RET
+
+;========================================================
+; SIO2_INIT - Initialize 8251 USART Channel B
+;========================================================
+; Same init sequence as SIO_INIT but targeting Channel B
+; ports (SIO2_STATUS). Only assembled when SIO_8251=1.
+;
+; Destroys: A
+;========================================================
+SIO2_INIT:
+        IF SIO_8251
+        XRA     A               ; A = 00H
+        OUT     SIO2_STATUS     ; Flush byte 1
+        OUT     SIO2_STATUS     ; Flush byte 2
+        OUT     SIO2_STATUS     ; Flush byte 3
+        MVI     A,40H           ; Internal Reset
+        OUT     SIO2_STATUS
+        MVI     A,4EH           ; Mode: 16x baud, 8N1
+        OUT     SIO2_STATUS
+        MVI     A,37H           ; Cmd: TxEN, DTR, RxEN, ER, RTS
+        OUT     SIO2_STATUS
         ENDIF
         RET
 

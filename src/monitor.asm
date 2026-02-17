@@ -2,7 +2,7 @@
 ; JX Monitor - Command Processor
 ;========================================================
 ; Interactive monitor with hex dump, memory test, write,
-; execute, memory info, and help commands.
+; execute, load, memory info, and help commands.
 ;
 ; Commands:
 ;   help / ?           Show available commands
@@ -10,6 +10,7 @@
 ;   test / t [s e]     Destructive RAM test
 ;   write / w <a> <b>  Write bytes to memory
 ;   go / g <addr>      Execute code at address
+;   load / l <port>    Load Intel HEX via serial
 ;   mem / m            Show memory layout
 ;   cls                Clear screen
 ;
@@ -111,6 +112,15 @@ MDISP:
         JZ      DO_MEM
 
         LHLD    CMDPTR
+        LXI     D,CMD_LOAD
+        CALL    STRCMP
+        JZ      DO_LOAD
+        LHLD    CMDPTR
+        LXI     D,CMD_L
+        CALL    STRCMP
+        JZ      DO_LOAD
+
+        LHLD    CMDPTR
         LXI     D,CMD_CLS
         CALL    STRCMP
         JZ      DO_CLS
@@ -138,6 +148,8 @@ CMD_GO:         DB      'GO',0
 CMD_G:          DB      'G',0
 CMD_MEM:        DB      'MEM',0
 CMD_M:          DB      'M',0
+CMD_LOAD:       DB      'LOAD',0
+CMD_L:          DB      'L',0
 CMD_CLS:        DB      'CLS',0
 
 ;========================================================
@@ -518,6 +530,311 @@ MEM_KP:
         JMP     MONITOR
 
 ;========================================================
+; DO_LOAD - Load Intel HEX via serial port
+;========================================================
+; l <port>   (1=console, 2=auxiliary)
+;
+; Self-modifying code patches IN instructions to select
+; the serial port at runtime (8080 IN uses immediate addr).
+;
+; Register usage during record loop:
+;   B  = running checksum
+;   C  = remaining byte count
+;   DE = destination memory address
+;   HL = scratch (LD_BCNT increment)
+;========================================================
+DO_LOAD:
+        LHLD    ARGPTR
+        MOV     A,M
+        ORA     A
+        JZ      LD_USE          ; No argument
+
+        CALL    PRHX_IN
+        JC      LD_USE          ; Parse error
+
+        ; E = port number (1 or 2)
+        MOV     A,E
+        CPI     1
+        JZ      LD_P1
+        CPI     2
+        JZ      LD_P2
+        JMP     LD_USE          ; Invalid port
+
+        ; --- Port 1 (console) ---
+LD_P1:
+        MVI     A,SIO_STATUS
+        STA     LDST+1          ; Patch status port
+        MVI     A,SIO_RX_MASK
+        STA     LDST+3          ; Patch RX mask
+        MVI     A,SIO_DATA
+        STA     LDDT+1          ; Patch data port
+        XRA     A
+        STA     LD_PORT         ; 0 = console
+        JMP     LD_GO
+
+        ; --- Port 2 (auxiliary) ---
+LD_P2:
+        CALL    SIO2_INIT
+        MVI     A,SIO2_STATUS
+        STA     LDST+1          ; Patch status port
+        MVI     A,SIO2_RX_MASK
+        STA     LDST+3          ; Patch RX mask
+        MVI     A,SIO2_DATA
+        STA     LDDT+1          ; Patch data port
+        MVI     A,1
+        STA     LD_PORT         ; 1 = aux
+        JMP     LD_GO
+
+LD_USE:
+        LXI     H,MSG_LUSE
+        CALL    PRINTS
+        JMP     MONITOR
+
+        ;--- Start loading ---
+LD_GO:
+        LXI     H,MSG_LRDY
+        CALL    PRINTS
+
+        ; Initialize counters
+        LXI     H,0
+        SHLD    LD_BCNT
+        SHLD    LD_ECNT
+
+        ; --- Wait for ':' start of record ---
+LD_WAIT:
+        CALL    LDIN
+        CPI     ':'
+        JNZ     LD_WAIT
+
+        ; --- Read byte count (LL) ---
+        CALL    RDHEX
+        MOV     C,A             ; C = byte count
+        MOV     B,A             ; B = checksum (starts with LL)
+
+        ; --- Read address high (AH) ---
+        CALL    RDHEX
+        MOV     D,A             ; D = addr high
+        ADD     B
+        MOV     B,A             ; Update checksum
+
+        ; --- Read address low (AL) ---
+        CALL    RDHEX
+        MOV     E,A             ; E = addr low
+        ADD     B
+        MOV     B,A             ; Update checksum
+
+        ; --- Read record type (TT) ---
+        CALL    RDHEX
+        PUSH    PSW             ; Save TT
+        ADD     B
+        MOV     B,A             ; Update checksum
+        POP     PSW             ; Restore TT
+
+        ; TT=01: end of file
+        CPI     01H
+        JZ      LD_EOF
+
+        ; TT=00: data record
+        CPI     00H
+        JZ      LD_DATA
+
+        ; Unknown type: skip remaining bytes (C data + 1 checksum)
+LD_SKIP:
+        CALL    RDHEX           ; Consume and discard
+        DCR     C
+        JNZ     LD_SKIP
+        CALL    RDHEX           ; Consume checksum byte
+        JMP     LD_WAIT
+
+        ; --- Read data bytes ---
+LD_DATA:
+        MOV     A,C
+        ORA     A
+        JZ      LD_CHK          ; Zero-length record
+
+LD_DLUP:
+        PUSH    B               ; Save B=checksum, C=count
+        PUSH    D               ; Save DE=dest address
+        CALL    RDHEX           ; A = data byte
+        POP     D               ; Restore DE
+        POP     B               ; Restore B,C
+
+        ; Store byte to memory
+        STAX    D               ; [DE] = A
+        INX     D               ; Advance destination
+
+        ; Update checksum
+        ADD     B
+        MOV     B,A
+
+        ; Increment LD_BCNT
+        PUSH    H
+        LHLD    LD_BCNT
+        INX     H
+        SHLD    LD_BCNT
+        POP     H
+
+        ; Loop
+        DCR     C
+        JNZ     LD_DLUP
+
+        ; --- Verify checksum ---
+LD_CHK:
+        PUSH    B               ; Save checksum in B
+        PUSH    D               ; Save DE (not needed but symmetric)
+        CALL    RDHEX           ; Read checksum byte
+        POP     D
+        POP     B
+        ADD     B               ; Sum should be 00
+        JZ      LD_GOK          ; Good checksum
+
+        ; Bad checksum
+        PUSH    H
+        LHLD    LD_ECNT
+        INX     H
+        SHLD    LD_ECNT
+        POP     H
+
+        ; Print 'X' if aux port (console is free)
+        LDA     LD_PORT
+        ORA     A
+        JZ      LD_WAIT         ; Port 1: no output during transfer
+        MVI     A,'X'
+        CALL    PUTCHAR
+        JMP     LD_WAIT
+
+        ; Good record
+LD_GOK:
+        ; Print '.' if aux port
+        LDA     LD_PORT
+        ORA     A
+        JZ      LD_WAIT         ; Port 1: no output
+        MVI     A,'.'
+        CALL    PUTCHAR
+        JMP     LD_WAIT
+
+        ; --- End of file ---
+LD_EOF:
+        ; Read and discard EOF checksum byte
+        PUSH    B
+        CALL    RDHEX
+        POP     B
+
+        ; Newline if we printed progress dots
+        LDA     LD_PORT
+        ORA     A
+        JZ      LD_DONE
+        CALL    PRCRLF
+
+LD_DONE:
+        ; Print "Loaded NNNN bytes, "
+        LXI     H,MSG_LLDD
+        CALL    PRINTS
+        LHLD    LD_BCNT
+        CALL    PRDEC16
+        LXI     H,MSG_LBYT
+        CALL    PRINTS
+
+        ; Check error count
+        LHLD    LD_ECNT
+        MOV     A,H
+        ORA     L
+        JNZ     LD_PERR
+
+        ; No errors
+        LXI     H,MSG_TNOE
+        CALL    PRINTS
+        JMP     MONITOR
+
+        ; Has errors
+LD_PERR:
+        LHLD    LD_ECNT
+        CALL    PRDEC16
+        LXI     H,MSG_TERP
+        CALL    PRINTS
+        JMP     MONITOR
+
+;========================================================
+; LDIN - Read one byte from selected serial port
+;========================================================
+; Self-modifying: port addresses patched by DO_LOAD.
+; Returns: A = character (parity stripped)
+; Destroys: A
+;========================================================
+LDIN:
+LDST:   IN      0               ; +1 patched: status port
+        ANI     0               ; +3 patched: RX mask
+        JZ      LDIN
+LDDT:   IN      0               ; +1 patched: data port
+        ANI     7FH             ; Strip parity
+        RET
+
+;========================================================
+; RDHEX - Read 2 hex ASCII chars, return byte
+;========================================================
+; Reads two characters via LDIN, converts to binary byte.
+; Returns: A = byte value
+; Destroys: A
+; Preserves: B, C, D, E (via push/pop)
+;========================================================
+RDHEX:
+        PUSH    B               ; Preserve BC
+        PUSH    D               ; Preserve DE
+
+        ; Read high nibble
+        CALL    LDIN
+        CALL    HEXNIB
+        RLC                     ; Shift left 4 bits
+        RLC
+        RLC
+        RLC
+        ANI     0F0H
+        MOV     D,A             ; D = high nibble << 4
+
+        ; Read low nibble
+        CALL    LDIN
+        CALL    HEXNIB
+        ANI     0FH
+        ORA     D               ; Combine: A = (high << 4) | low
+
+        POP     D               ; Restore DE
+        POP     B               ; Restore BC
+        RET
+
+;========================================================
+; HEXNIB - Convert ASCII hex char to 0-15
+;========================================================
+; Input:  A = ASCII character ('0'-'9','A'-'F','a'-'f')
+; Output: A = 0-15 (invalid chars return 0)
+; Destroys: A
+;========================================================
+HEXNIB:
+        CPI     '0'
+        JC      HEXNB0          ; Below '0' -> 0
+        CPI     '9'+1
+        JC      HEXNBD          ; '0'-'9'
+        CPI     'A'
+        JC      HEXNB0          ; Between '9' and 'A'
+        CPI     'F'+1
+        JC      HEXNBA          ; 'A'-'F'
+        CPI     'a'
+        JC      HEXNB0          ; Between 'F' and 'a'
+        CPI     'f'+1
+        JC      HEXNBL          ; 'a'-'f'
+HEXNB0:
+        XRA     A               ; Invalid -> 0
+        RET
+HEXNBD:
+        SUI     '0'             ; '0'-'9' -> 0-9
+        RET
+HEXNBA:
+        SUI     'A'-10          ; 'A'-'F' -> 10-15
+        RET
+HEXNBL:
+        SUI     'a'-10          ; 'a'-'f' -> 10-15
+        RET
+
+;========================================================
 ; DO_CLS - Clear screen
 ;========================================================
 DO_CLS:
@@ -734,6 +1051,9 @@ TST_EADR:       DW      0       ; Test end address
 TST_CADR:       DW      0       ; Test current address
 TST_ECNT:       DW      0       ; Test error count
 WRT_ADDR:       DW      0       ; Write current address
+LD_PORT:        DB      0       ; 0=port1 (console), 1=port2 (aux)
+LD_BCNT:        DW      0       ; Total bytes loaded
+LD_ECNT:        DW      0       ; Checksum error count
 CMDBUF:         DS      CMDBUF_SIZE     ; Command input buffer
 
 ;========================================================
@@ -748,6 +1068,7 @@ MSG_HELP:
         DB      '  t [<start> <end>]   RAM test (destructive)',CR,LF
         DB      '  w <addr> <bb> ..    Write bytes',CR,LF
         DB      '  g <addr>            Go (execute)',CR,LF
+        DB      '  l <port>            Load Intel HEX (1=con, 2=aux)',CR,LF
         DB      '  m                   Memory info',CR,LF
         DB      '  cls                 Clear screen',CR,LF
         DB      '  ? or help           This message',CR,LF
@@ -759,6 +1080,10 @@ MSG_DERR:       DB      'Usage: d <addr> [<end>]',CR,LF,0
 MSG_TERR:       DB      'Usage: t [<start> <end>]',CR,LF,0
 MSG_WERR:       DB      'Usage: w <addr> <byte> ...',CR,LF,0
 MSG_GERR:       DB      'Usage: g <addr>',CR,LF,0
+MSG_LUSE:       DB      'Usage: l <port> (1=con, 2=aux)',CR,LF,0
+MSG_LRDY:       DB      'Send Intel HEX data...',CR,LF,0
+MSG_LLDD:       DB      'Loaded ',0
+MSG_LBYT:       DB      ' bytes, ',0
 
 MSG_TSRT:       DB      'Testing ',0
 MSG_TFER:       DB      'FAIL at ',0

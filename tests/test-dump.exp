@@ -1,0 +1,22 @@
+#!/usr/bin/expect -f
+#========================================================
+# Test: d command (hex dump)
+#========================================================
+
+source [file dirname [info script]]/harness.exp
+
+boot
+
+# Dump at address 0 - should produce 8 lines starting at 0000:
+set output [capture_until_prompt "d 0"]
+assert_contains $output "0000:" "d 0 starts at 0000:"
+
+# Dump with range - should produce 2 lines
+set output [capture_until_prompt "d 100 11F"]
+assert_contains $output "0100:" "d 100 11F starts at 0100:"
+
+# Dump with no args - should show usage
+set output [capture_until_prompt "d"]
+assert_contains $output "Usage: d" "d with no args shows usage"
+
+cleanup

@@ -1,0 +1,23 @@
+#!/usr/bin/expect -f
+#========================================================
+# Test: w command + write-then-dump round-trip
+#========================================================
+
+source [file dirname [info script]]/harness.exp
+
+boot
+
+# Write single byte - should return to prompt without error
+set output [capture_until_prompt "w 8000 AA"]
+assert_not_contains $output "Usage:" "w 8000 AA succeeds"
+
+# Write with no args - should show usage
+set output [capture_until_prompt "w"]
+assert_contains $output "Usage: w" "w with no args shows usage"
+
+# Round-trip: write bytes then dump to verify
+capture_until_prompt "w 8000 DE AD BE EF"
+set output [capture_until_prompt "d 8000 800F"]
+assert_contains $output "DE AD BE EF" "Round-trip: written bytes visible in dump"
+
+cleanup

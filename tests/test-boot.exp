@@ -1,0 +1,16 @@
+#!/usr/bin/expect -f
+#========================================================
+# Test: Boot sequence verification
+#========================================================
+
+source [file dirname [info script]]/harness.exp
+
+boot
+
+# Check boot output for expected strings
+assert_contains $boot_output "JX/8080 Monitor v0" "Banner present"
+assert_contains $boot_output "Scanning:" "Scanning message"
+assert_contains $boot_output "KB" "Memory size reported"
+assert_contains $boot_output "Type ? for help" "Ready message"
+
+cleanup

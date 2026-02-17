@@ -68,8 +68,10 @@ BOOT:
         IF VIDEO_BASE
         ; Initialize video display
         CALL    V_INIT
+        LXI     H,MSG_BANNER
+        CALL    V_PRINTS        ; Video-only: banner already on serial via PRMSG
         LXI     H,MSG_VIDEO
-        CALL    PRINTS
+        CALL    PRINTS          ; Both outputs: video info goes to serial too
         ENDIF
 
         ; Set up Page Zero (only when monitor is not at address 0)
@@ -320,6 +322,25 @@ PRMSG:
         JMP     PRMSG
 
 ;========================================================
+; V_PRINTS - Print null-terminated string via video only
+;========================================================
+; Used for video-init banner (already printed on serial).
+; Input:  HL = pointer to null-terminated string
+; Destroys: A, B, C, D, E, H, L
+;========================================================
+        IF VIDEO_BASE
+V_PRINTS:
+        MOV     A,M
+        ORA     A
+        RZ
+        PUSH    H
+        CALL    V_PUTCH
+        POP     H
+        INX     H
+        JMP     V_PRINTS
+        ENDIF
+
+;========================================================
 ; PRDEC - Print A as decimal (0-99)
 ;========================================================
 ; Simple decimal for boot messages (memory KB).
@@ -366,7 +387,8 @@ DETECTED_MEM:   DW      0       ; Detected memory top
 ;========================================================
 MSG_BANNER:
         DB      CR,LF
-        DB      'JX/8080 Monitor v0.3'
+        DB      'JX/8080 Monitor v'
+        DB      '0'+VER_MAJOR,'.','0'+VER_MINOR
         DB      CR,LF,0
 
 MSG_MEMORY:

@@ -1,0 +1,21 @@
+#!/usr/bin/expect -f
+#========================================================
+# Test: ? and help commands
+#========================================================
+
+source [file dirname [info script]]/harness.exp
+
+boot
+
+# Test ? command
+set output [capture_until_prompt "?"]
+assert_contains $output "JX Monitor Commands:" "? shows help header"
+assert_contains $output "d <addr>" "? lists dump command"
+assert_contains $output "w <addr>" "? lists write command"
+
+# Test help command
+set output [capture_until_prompt "help"]
+assert_contains $output "JX Monitor Commands:" "help shows help header"
+assert_contains $output "g <addr>" "help lists go command"
+
+cleanup

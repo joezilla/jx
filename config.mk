@@ -41,6 +41,17 @@ SIO_RX_MASK = 02H
 SIO_TX_MASK = 01H
 SIO_8251   = 1
 
+# SIO Channel B (auxiliary serial port)
+SIO2_DATA    = 14H
+SIO2_STATUS  = 15H
+SIO2_RX_MASK = 02H
+
+# ----------------------------------------------
+# Version
+# ----------------------------------------------
+VER_MAJOR = 0
+VER_MINOR = 4
+
 # ----------------------------------------------
 # Memory Configuration
 # ----------------------------------------------

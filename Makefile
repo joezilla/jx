@@ -1,7 +1,8 @@
 # JX Monitor - Makefile
 # =====================
 
-include config.mk
+CONFIG ?= config.mk
+include $(CONFIG)
 
 # ----------------------------------------------
 # Memory Layout
@@ -41,11 +42,14 @@ endif
 # Assembler defines
 MEM_DEFINES = -dBIOS_BASE=$(BIOS_BASE) -dMEM_SIZE=$(MEM_SIZE)
 MEM_DEFINES += -dSTACK_TOP=$(STACK_TOP) -dMEMTOP=$(MEMTOP)
+MEM_DEFINES += -dVER_MAJOR=$(VER_MAJOR) -dVER_MINOR=$(VER_MINOR)
 
 # Serial defines
 HW_DEFINES = -dSIO_DATA=$(SIO_DATA) -dSIO_STATUS=$(SIO_STATUS)
 HW_DEFINES += -dSIO_RX_MASK=$(SIO_RX_MASK) -dSIO_TX_MASK=$(SIO_TX_MASK)
 HW_DEFINES += -dSIO_8251=$(SIO_8251)
+HW_DEFINES += -dSIO2_DATA=$(SIO2_DATA) -dSIO2_STATUS=$(SIO2_STATUS)
+HW_DEFINES += -dSIO2_RX_MASK=$(SIO2_RX_MASK)
 
 # Video defines (always pass VIDEO_BASE so IF/ENDIF works before INCLUDE)
 HW_DEFINES += -dVIDEO_BASE=$(VIDEO_BASE)
@@ -65,7 +69,7 @@ BIOS_SRCS = $(wildcard $(BIOS_DIR)/*.asm) \
 # ----------------------------------------------
 # Targets
 # ----------------------------------------------
-.PHONY: all hex disk clean distclean run help check-tools info dirs
+.PHONY: all hex disk clean distclean run test help check-tools info dirs
 
 all: dirs check-tools $(SYSTEM_BIN)
 	@echo "Build complete: $(SYSTEM_BIN)"
@@ -134,6 +138,9 @@ disk: hex
 run: hex
 	@echo "Starting JX Monitor..."
 	@$(SIMULATOR) $(SIM_FLAGS) -x $(SYSTEM_HEX)
+
+test:
+	@./tests/run-tests.sh
 
 clean:
 	rm -f $(BUILD_DIR)/*.bin $(BUILD_DIR)/*.hex $(BUILD_DIR)/*.lis

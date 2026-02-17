@@ -1,0 +1,16 @@
+#!/usr/bin/expect -f
+#========================================================
+# Test: t command (RAM test, small range)
+#========================================================
+
+source [file dirname [info script]]/harness.exp
+
+boot
+
+# Test a small safe range
+set output [capture_until_prompt "t 8000 80FF"]
+assert_contains $output "Testing 8000-80FF" "t shows test range"
+assert_contains $output "Test complete:" "t shows completion"
+assert_contains $output "no errors" "t reports no errors"
+
+cleanup
