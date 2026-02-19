@@ -59,17 +59,23 @@ ifneq ($(VIDEO_BASE),0)
     HW_DEFINES += -dVIDEO_ROWS=$(VIDEO_ROWS)
 endif
 
-ALL_DEFINES = $(MEM_DEFINES) $(HW_DEFINES)
+# BASIC defines
+BASIC_DEFINES = -dENABLE_BASIC=$(ENABLE_BASIC)
+
+ALL_DEFINES = $(MEM_DEFINES) $(HW_DEFINES) $(BASIC_DEFINES)
 
 # Source files
 BIOS_SRCS = $(wildcard $(BIOS_DIR)/*.asm) \
             $(wildcard $(SRC_DIR)/lib/*.asm) \
             $(wildcard $(SRC_DIR)/*.asm)
 
+BASIC_SRCS = $(wildcard $(SRC_DIR)/basic/*.asm)
+BASIC_HEX = $(BUILD_DIR)/basic.hex
+
 # ----------------------------------------------
 # Targets
 # ----------------------------------------------
-.PHONY: all hex disk clean distclean run test help check-tools info dirs
+.PHONY: all hex disk clean distclean run test help check-tools info dirs basic
 
 all: dirs check-tools $(SYSTEM_BIN)
 	@echo "Build complete: $(SYSTEM_BIN)"
@@ -138,6 +144,15 @@ disk: hex
 run: hex
 	@echo "Starting JX Monitor..."
 	@$(SIMULATOR) $(SIM_FLAGS) -x $(SYSTEM_HEX)
+
+# Build standalone Tiny BASIC (Intel HEX, load via monitor L command)
+basic: dirs check-tools $(BASIC_HEX)
+	@echo "Build complete: $(BASIC_HEX)"
+	@echo "  Load via monitor 'L' command, run via 'G 0100'"
+
+$(BASIC_HEX): $(BASIC_SRCS) | dirs
+	@echo "ASM  standalone.asm -> $@"
+	@cd $(SRC_DIR)/basic && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_HEX) -e32 -o$(CURDIR)/$@ standalone.asm
 
 test:
 	@./tests/run-tests.sh

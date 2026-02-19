@@ -125,6 +125,17 @@ MDISP:
         CALL    STRCMP
         JZ      DO_CLS
 
+        IF ENABLE_BASIC
+        LHLD    CMDPTR
+        LXI     D,CMD_BASIC
+        CALL    STRCMP
+        JZ      DO_BASIC
+        LHLD    CMDPTR
+        LXI     D,CMD_B
+        CALL    STRCMP
+        JZ      DO_BASIC
+        ENDIF
+
         ; Unknown command
         LXI     H,MSG_UNK
         CALL    PRINTS
@@ -151,6 +162,10 @@ CMD_M:          DB      'M',0
 CMD_LOAD:       DB      'LOAD',0
 CMD_L:          DB      'L',0
 CMD_CLS:        DB      'CLS',0
+        IF ENABLE_BASIC
+CMD_BASIC:      DB      'BASIC',0
+CMD_B:          DB      'B',0
+        ENDIF
 
 ;========================================================
 ; DO_HELP
@@ -862,6 +877,14 @@ DO_CLS:
         JMP     MONITOR
 
 ;========================================================
+; DO_BASIC - Launch built-in Tiny BASIC
+;========================================================
+        IF ENABLE_BASIC
+DO_BASIC:
+        JMP     TB_INIT         ; Jump to BASIC cold start
+        ENDIF
+
+;========================================================
 ; RDLINE - Read line into CMDBUF
 ;========================================================
 ; Handles: CR (done), BS/DEL (backspace), printable chars.
@@ -1071,6 +1094,9 @@ MSG_HELP:
         DB      '  l <port>            Load Intel HEX (1=con, 2=aux)',CR,LF
         DB      '  m                   Memory info',CR,LF
         DB      '  cls                 Clear screen',CR,LF
+        IF ENABLE_BASIC
+        DB      '  b                   Start Tiny BASIC',CR,LF
+        ENDIF
         DB      '  ? or help           This message',CR,LF
         DB      CR,LF
         DB      'Addresses and bytes are hex.',CR,LF,0

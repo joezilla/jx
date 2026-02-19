@@ -41,6 +41,20 @@ CR              EQU     0DH
 LF              EQU     0AH
 
 ;========================================================
+; BIOS Jump Table (0000H-000BH)
+;========================================================
+; CP/M-style vectors for loaded programs.
+; When BIOS_BASE=0, the table is inline at ORG 0.
+; When BIOS_BASE>0, INIT_PAGE0 writes it to page zero.
+;========================================================
+        IF BIOS_BASE = 0
+JT_WBOOT:       JMP     BOOT            ; 0000 - patched to WBOOT after init
+JT_CONST:       JMP     CONST           ; 0003
+JT_GCHR:        JMP     GETCHAR         ; 0006
+JT_PCHR:        JMP     PUTCHAR         ; 0009
+        ENDIF
+
+;========================================================
 ; Cold Boot
 ;========================================================
 BOOT:
@@ -82,6 +96,14 @@ BOOT:
         ; Print memory map
         CALL    PRMMAP
 
+        ; Patch jump table warm boot vector (BIOS_BASE=0 only)
+        IF BIOS_BASE = 0
+        MVI     A,0C3H          ; JMP opcode
+        STA     0000H
+        LXI     H,WBOOT
+        SHLD    0001H
+        ENDIF
+
         ; System ready - enter monitor
         LXI     H,MSG_READY
         CALL    PRINTS
@@ -109,9 +131,21 @@ WBOOT:
         IF BIOS_BASE
 INIT_PAGE0:
         MVI     A,0C3H          ; JMP opcode
-        STA     0000H
+        STA     0000H           ; WBOOT vector
         LXI     H,WBOOT
         SHLD    0001H
+        MVI     A,0C3H
+        STA     0003H           ; CONST vector
+        LXI     H,CONST
+        SHLD    0004H
+        MVI     A,0C3H
+        STA     0006H           ; GETCHAR vector
+        LXI     H,GETCHAR
+        SHLD    0007H
+        MVI     A,0C3H
+        STA     0009H           ; PUTCHAR vector
+        LXI     H,PUTCHAR
+        SHLD    000AH
         RET
         ENDIF
 
@@ -132,7 +166,9 @@ PUTCHAR:
         PUSH    PSW
         PUSH    H
         PUSH    B               ; Save BC (V_SCROLL destroys B)
+        PUSH    D               ; Save DE (V_PUTCH destroys DE)
         CALL    V_PUTCH         ; Video output
+        POP     D
         POP     B
         ENDIF
         POP     H
@@ -381,6 +417,21 @@ DETECTED_MEM:   DW      0       ; Detected memory top
         INCLUDE ../lib/print.asm
         INCLUDE ../lib/string.asm
         INCLUDE ../monitor.asm
+
+;========================================================
+; Tiny BASIC (optional, built-in)
+;========================================================
+; Note: INCLUDE is outside IF ENABLE_BASIC because z80asm
+; has issues with IF/ENDIF nesting across INCLUDE boundaries.
+; tinybasic.asm checks ENABLE_BASIC internally.
+        IF BIOS_BASE = 0
+BASIC_VAR       EQU     02000H
+        ELSE
+BASIC_VAR       EQU     00100H
+        ENDIF
+BASIC_TEXT       EQU     BASIC_VAR + 0100H
+
+        INCLUDE ../basic/tinybasic.asm
 
 ;========================================================
 ; Boot Messages

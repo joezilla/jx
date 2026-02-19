@@ -80,6 +80,13 @@ VIDEO_COLS = 64
 VIDEO_ROWS = 16
 
 # ----------------------------------------------
+# BASIC Interpreter
+# ----------------------------------------------
+# Set to 1 to include Tiny BASIC in the monitor.
+# Set to 0 to omit (BASIC can still be loaded standalone).
+ENABLE_BASIC = 1
+
+# ----------------------------------------------
 # Build Directories
 # ----------------------------------------------
 SRC_DIR = src
