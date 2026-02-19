@@ -138,6 +138,7 @@ $(SYSTEM_HEX): $(BIOS_SRCS) | dirs
 
 # Create boot disk image
 disk: hex
+	@mkdir -p $(DIST_DIR)
 	@echo "DISK $(SYSTEM_HEX) -> $(SYSTEM_DSK)"
 	@node scripts/create-boot-disk.js --8inch -o $(SYSTEM_DSK) $(SYSTEM_HEX)
 
@@ -164,6 +165,7 @@ clean:
 
 distclean:
 	rm -rf $(BUILD_DIR)
+	rm -rf $(DIST_DIR)
 
 info:
 	@echo "Configuration:"

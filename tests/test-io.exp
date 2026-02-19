@@ -1,0 +1,22 @@
+#!/usr/bin/expect -f
+#========================================================
+# Test: in and out commands (port I/O)
+#========================================================
+
+source [file dirname [info script]]/harness.exp
+
+boot
+
+# in 00 - read console status port (should return hex byte)
+set output [capture_until_prompt "in 00"]
+assert_not_contains $output "Usage:" "in 00 succeeds"
+
+# in with uppercase
+set output [capture_until_prompt "IN 00"]
+assert_not_contains $output "Usage:" "IN 00 (uppercase) succeeds"
+
+# out 01 41 - write 'A' to console data port
+set output [capture_until_prompt "out 01 41"]
+assert_not_contains $output "Usage:" "out 01 41 succeeds"
+
+cleanup

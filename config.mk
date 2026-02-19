@@ -50,7 +50,7 @@ SIO2_RX_MASK = 02H
 # Version
 # ----------------------------------------------
 VER_MAJOR = 0
-VER_MINOR = 4
+VER_MINOR = 5
 
 # ----------------------------------------------
 # Memory Configuration
@@ -84,7 +84,7 @@ VIDEO_ROWS = 16
 # ----------------------------------------------
 # Set to 1 to include Tiny BASIC in the monitor.
 # Set to 0 to omit (BASIC can still be loaded standalone).
-ENABLE_BASIC = 1
+ENABLE_BASIC = 0
 
 # ----------------------------------------------
 # Build Directories
@@ -98,4 +98,5 @@ BIOS_DIR = $(SRC_DIR)/bios
 # ----------------------------------------------
 SYSTEM_BIN = $(BUILD_DIR)/jx.bin
 SYSTEM_HEX = $(BUILD_DIR)/jx.hex
-SYSTEM_DSK = jx.dsk
+DIST_DIR = dist
+SYSTEM_DSK = $(DIST_DIR)/jx.dsk

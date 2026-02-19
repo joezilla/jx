@@ -13,6 +13,8 @@
 ;   load / l <port>    Load Intel HEX via serial
 ;   mem / m            Show memory layout
 ;   cls                Clear screen
+;   in <port>          Read I/O port
+;   out <port> <byte>  Write I/O port
 ;
 ; This module is INCLUDEd by bios.asm.
 ;========================================================
@@ -125,6 +127,16 @@ MDISP:
         CALL    STRCMP
         JZ      DO_CLS
 
+        LHLD    CMDPTR
+        LXI     D,CMD_IN
+        CALL    STRCMP
+        JZ      DO_IN
+
+        LHLD    CMDPTR
+        LXI     D,CMD_OUT
+        CALL    STRCMP
+        JZ      DO_OUT
+
         IF ENABLE_BASIC
         LHLD    CMDPTR
         LXI     D,CMD_BASIC
@@ -162,6 +174,8 @@ CMD_M:          DB      'M',0
 CMD_LOAD:       DB      'LOAD',0
 CMD_L:          DB      'L',0
 CMD_CLS:        DB      'CLS',0
+CMD_IN:         DB      'IN',0
+CMD_OUT:        DB      'OUT',0
         IF ENABLE_BASIC
 CMD_BASIC:      DB      'BASIC',0
 CMD_B:          DB      'B',0
@@ -877,6 +891,69 @@ DO_CLS:
         JMP     MONITOR
 
 ;========================================================
+; DO_IN - Read byte from I/O port
+;========================================================
+; in <port>
+; Uses self-modifying code to patch IN instruction operand.
+;========================================================
+DO_IN:
+        LHLD    ARGPTR          ; Get argument string
+        MOV     A,M
+        ORA     A
+        JZ      IN_ERR          ; No argument
+
+        CALL    PRHX_IN         ; Parse port number -> DE
+        JC      IN_ERR          ; Parse error
+
+        MOV     A,E             ; Port number (low byte)
+        STA     IN_RD+1         ; Patch IN instruction operand
+
+IN_RD:  IN      0               ; Self-modified port byte
+        CALL    PRHEX8          ; Print value as 2-digit hex
+        CALL    PRCRLF
+        JMP     MONITOR
+
+IN_ERR:
+        LXI     H,MSG_IERR
+        CALL    PRINTS
+        JMP     MONITOR
+
+;========================================================
+; DO_OUT - Write byte to I/O port
+;========================================================
+; out <port> <byte>
+; Uses self-modifying code to patch OUT instruction operand.
+;========================================================
+DO_OUT:
+        LHLD    ARGPTR          ; Get argument string
+        MOV     A,M
+        ORA     A
+        JZ      OUT_ERR         ; No argument
+
+        CALL    PRHX_IN         ; Parse port number -> DE
+        JC      OUT_ERR
+
+        MOV     A,E
+        STA     OUT_WR+1        ; Patch OUT instruction operand
+
+        CALL    SKIPSP          ; Skip spaces before data byte
+        MOV     A,M
+        ORA     A
+        JZ      OUT_ERR         ; No data byte
+
+        CALL    PRHX_IN         ; Parse data byte -> DE
+        JC      OUT_ERR
+
+        MOV     A,E             ; Data byte (low byte)
+OUT_WR: OUT     0               ; Self-modified port byte
+        JMP     MONITOR
+
+OUT_ERR:
+        LXI     H,MSG_OERR
+        CALL    PRINTS
+        JMP     MONITOR
+
+;========================================================
 ; DO_BASIC - Launch built-in Tiny BASIC
 ;========================================================
         IF ENABLE_BASIC
@@ -1094,6 +1171,8 @@ MSG_HELP:
         DB      '  l <port>            Load Intel HEX (1=con, 2=aux)',CR,LF
         DB      '  m                   Memory info',CR,LF
         DB      '  cls                 Clear screen',CR,LF
+        DB      '  in <port>           Read I/O port',CR,LF
+        DB      '  out <port> <byte>   Write I/O port',CR,LF
         IF ENABLE_BASIC
         DB      '  b                   Start Tiny BASIC',CR,LF
         ENDIF
@@ -1106,6 +1185,8 @@ MSG_DERR:       DB      'Usage: d <addr> [<end>]',CR,LF,0
 MSG_TERR:       DB      'Usage: t [<start> <end>]',CR,LF,0
 MSG_WERR:       DB      'Usage: w <addr> <byte> ...',CR,LF,0
 MSG_GERR:       DB      'Usage: g <addr>',CR,LF,0
+MSG_IERR:       DB      'Usage: in <port>',CR,LF,0
+MSG_OERR:       DB      'Usage: out <port> <byte>',CR,LF,0
 MSG_LUSE:       DB      'Usage: l <port> (1=con, 2=aux)',CR,LF,0
 MSG_LRDY:       DB      'Send Intel HEX data...',CR,LF,0
 MSG_LLDD:       DB      'Loaded ',0

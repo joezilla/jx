@@ -50,7 +50,7 @@ SIO2_RX_MASK = 0
 # Version
 # ----------------------------------------------
 VER_MAJOR = 0
-VER_MINOR = 4
+VER_MINOR = 5
 
 # ----------------------------------------------
 # Memory Configuration

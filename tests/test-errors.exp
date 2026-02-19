@@ -19,4 +19,16 @@ assert_contains $output "Usage: g" "g with no args shows usage"
 set output [capture_until_prompt "t zzz"]
 assert_contains $output "Usage: t" "t with bad hex shows usage"
 
+# in with no args
+set output [capture_until_prompt "in"]
+assert_contains $output "Usage: in" "in with no args shows usage"
+
+# out with no args
+set output [capture_until_prompt "out"]
+assert_contains $output "Usage: out" "out with no args shows usage"
+
+# out with port but no data byte
+set output [capture_until_prompt "out 01"]
+assert_contains $output "Usage: out" "out with missing byte shows usage"
+
 cleanup

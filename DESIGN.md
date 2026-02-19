@@ -13,7 +13,7 @@ This document defines the architecture of JX, an interactive machine-language mo
 - **Simplicity**: Single flat binary, no layers or abstraction beyond hardware drivers
 - **Utility**: Practical tool for inspecting and manipulating memory on an 8080 system
 - **Dual output**: All display output to both serial console and VDM-1 video
-- **Small footprint**: Fits in ~3KB at the top of RAM
+- **Small footprint**: Fits in ~3.5KB at the top of RAM
 
 ### 1.2 Non-Goals
 
@@ -63,7 +63,7 @@ JX uses polled I/O. Interrupts are disabled at boot (`DI`).
              Available for user programs via 'go' command
 C000-C3FF  VDM-1 video framebuffer (if enabled)
              64 columns x 16 rows = 1024 bytes
-F400-FFFF  Monitor code + data (~3KB)
+F400-FFFF  Monitor code + data (~3.5KB)
              Includes: boot, serial, video, print, string, monitor
 ```
 
@@ -138,6 +138,8 @@ All print routines (PRINTS, PRHEX16, PRCRLF, etc.) call PUTCHAR, so all output a
 | `g` / `go` | `g <addr>` | Execute code at address |
 | `m` / `mem` | `m` | Show memory layout and detected RAM |
 | `cls` | `cls` | Clear screen (ANSI escape + video clear) |
+| `in` | `in <port>` | Read byte from I/O port |
+| `out` | `out <port> <byte>` | Write byte to I/O port |
 | `?` / `help` | `?` | Show command list |
 
 ### 5.1 Hex Dump Format

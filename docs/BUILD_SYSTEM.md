@@ -108,7 +108,7 @@ The build system passes configuration via `-d` flags:
 0000-00FF  Page Zero (JMP MONITOR)
 0100-BFFF  Free RAM (~48KB)
 C000-C3FF  VDM-1 video framebuffer
-F400-FFFF  Monitor (~3KB)
+F400-FFFF  Monitor (~3.5KB)
 ```
 
 ### 48KB
@@ -116,7 +116,7 @@ F400-FFFF  Monitor (~3KB)
 ```
 0000-00FF  Page Zero
 0100-B3FF  Free RAM (~45KB)
-B400-BFFF  Monitor (~3KB)
+B400-BFFF  Monitor (~3.5KB)
 ```
 
 ### 32KB
@@ -124,7 +124,7 @@ B400-BFFF  Monitor (~3KB)
 ```
 0000-00FF  Page Zero
 0100-73FF  Free RAM (~29KB)
-7400-7FFF  Monitor (~3KB)
+7400-7FFF  Monitor (~3.5KB)
 ```
 
 ---
