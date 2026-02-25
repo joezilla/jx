@@ -59,12 +59,19 @@ ifneq ($(VIDEO_BASE),0)
     HW_DEFINES += -dVIDEO_ROWS=$(VIDEO_ROWS)
 endif
 
-ALL_DEFINES = $(MEM_DEFINES) $(HW_DEFINES)
+# Optional module defines
+MOD_DEFINES =
+ifeq ($(ENABLE_TERM),1)
+    MOD_DEFINES += -dENABLE_TERM=1
+endif
+
+ALL_DEFINES = $(MEM_DEFINES) $(HW_DEFINES) $(MOD_DEFINES)
 
 # Source files
 BIOS_SRCS = $(wildcard $(BIOS_DIR)/*.asm) \
             $(wildcard $(SRC_DIR)/lib/*.asm) \
-            $(wildcard $(SRC_DIR)/*.asm)
+            $(wildcard $(SRC_DIR)/*.asm) \
+            $(wildcard $(SRC_DIR)/cmd/*.asm)
 
 # ----------------------------------------------
 # Targets
@@ -79,6 +86,9 @@ all: dirs check-tools $(SYSTEM_BIN)
 	@echo "  Serial:     data=$(SIO_DATA) status=$(SIO_STATUS) rx=$(SIO_RX_MASK) tx=$(SIO_TX_MASK)"
 ifneq ($(VIDEO_BASE),0)
 	@echo "  Video:      $(VIDEO_BASE) ($(VIDEO_COLS)x$(VIDEO_ROWS))"
+endif
+ifeq ($(ENABLE_TERM),1)
+	@echo "  Modules:    term"
 endif
 
 hex: dirs check-tools $(SYSTEM_HEX)

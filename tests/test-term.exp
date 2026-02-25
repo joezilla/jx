@@ -1,0 +1,24 @@
+#!/usr/bin/expect -f
+#========================================================
+# Test: term/e commands disabled in simulator build
+#========================================================
+# When built with ENABLE_TERM=0 (config.mk.sim), the
+# term and e commands should be unknown.
+
+source [file dirname [info script]]/harness.exp
+
+boot
+
+# term should be unknown
+set output [capture_until_prompt "term"]
+assert_contains $output "? " "term is unknown command when disabled"
+
+# e should be unknown
+set output [capture_until_prompt "e"]
+assert_contains $output "? " "e is unknown command when disabled"
+
+# Help should NOT mention term
+set output [capture_until_prompt "?"]
+assert_not_contains $output "term" "help does not list term when disabled"
+
+cleanup

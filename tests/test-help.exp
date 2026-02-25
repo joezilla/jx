@@ -12,6 +12,8 @@ set output [capture_until_prompt "?"]
 assert_contains $output "JX Monitor Commands:" "? shows help header"
 assert_contains $output "d <addr>" "? lists dump command"
 assert_contains $output "w <addr>" "? lists write command"
+assert_contains $output "in <port>" "? lists in command"
+assert_contains $output "out <port>" "? lists out command"
 
 # Test help command
 set output [capture_until_prompt "help"]

@@ -374,6 +374,13 @@ PRDT3:
 DETECTED_MEM:   DW      0       ; Detected memory top
 
 ;========================================================
+; Optional module defaults
+;========================================================
+        IFNDEF ENABLE_TERM
+ENABLE_TERM     EQU     0
+        ENDIF
+
+;========================================================
 ; Include sub-modules
 ;========================================================
         INCLUDE serial.asm
@@ -381,6 +388,7 @@ DETECTED_MEM:   DW      0       ; Detected memory top
         INCLUDE ../lib/print.asm
         INCLUDE ../lib/string.asm
         INCLUDE ../monitor.asm
+        INCLUDE ../cmd/term.asm
 
 ;========================================================
 ; Boot Messages

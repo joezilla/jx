@@ -1,0 +1,51 @@
+#!/usr/bin/expect -f
+#========================================================
+# Test: in and out commands (I/O port access)
+#========================================================
+
+source [file dirname [info script]]/harness.exp
+
+boot
+
+# --- IN command ---
+
+# in with no args shows usage
+set output [capture_until_prompt "in"]
+assert_contains $output "Usage: in" "in with no args shows usage"
+
+# in with bad hex shows usage
+set output [capture_until_prompt "in zzz"]
+assert_contains $output "Usage: in" "in with bad hex shows usage"
+
+# i (short form) with no args shows usage
+set output [capture_until_prompt "i"]
+assert_contains $output "Usage: in" "i shortcut with no args shows usage"
+
+# in 0 reads console status port - should return hex byte, no error
+set output [capture_until_prompt "in 0"]
+assert_not_contains $output "Usage:" "in 0 succeeds without error"
+
+# --- OUT command ---
+
+# out with no args shows usage
+set output [capture_until_prompt "out"]
+assert_contains $output "Usage: out" "out with no args shows usage"
+
+# out with only port shows usage (missing byte)
+set output [capture_until_prompt "out 1"]
+assert_contains $output "Usage: out" "out with missing byte shows usage"
+
+# out with bad hex shows usage
+set output [capture_until_prompt "out zzz"]
+assert_contains $output "Usage: out" "out with bad hex shows usage"
+
+# o (short form) with no args shows usage
+set output [capture_until_prompt "o"]
+assert_contains $output "Usage: out" "o shortcut with no args shows usage"
+
+# out 1 41 writes 'A' to console data port - should echo A
+set output [capture_until_prompt "out 1 41"]
+assert_contains $output "A" "out 1 41 echoes A to console"
+assert_not_contains $output "Usage:" "out 1 41 succeeds without error"
+
+cleanup
