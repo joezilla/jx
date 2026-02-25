@@ -120,6 +120,10 @@ SIO_INIT:
         OUT     SIO_STATUS      ; Flush byte 3
         MVI     A,40H           ; Internal Reset
         OUT     SIO_STATUS
+        ; Delay ~100us for 8251 internal reset to complete
+        MVI     A,10            ; 10 iterations
+SIODLY: DCR     A               ;   4 T-states
+        JNZ     SIODLY          ;  10 T-states -> ~70us at 2MHz
         ; Mode Instruction: 4EH = 01 00 11 10
         ;   01    = 1 stop bit
         ;   0     = parity type (don't care)
@@ -151,6 +155,10 @@ SIO2_INIT:
         OUT     SIO2_STATUS     ; Flush byte 3
         MVI     A,40H           ; Internal Reset
         OUT     SIO2_STATUS
+        ; Delay ~100us for 8251 internal reset to complete
+        MVI     A,10            ; 10 iterations
+SI2DLY: DCR     A               ;   4 T-states
+        JNZ     SI2DLY          ;  10 T-states -> ~70us at 2MHz
         MVI     A,4EH           ; Mode: 16x baud, 8N1
         OUT     SIO2_STATUS
         MVI     A,37H           ; Cmd: TxEN, DTR, RxEN, ER, RTS

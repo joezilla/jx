@@ -51,11 +51,14 @@ SIO2_RX_MASK = 0
 # ----------------------------------------------
 ENABLE_TERM = 0
 
+# BASIC: 0=none, 1=standalone boot, 2=build loadable hex
+ENABLE_BASIC = 1
+
 # ----------------------------------------------
 # Version
 # ----------------------------------------------
 VER_MAJOR = 0
-VER_MINOR = 4
+VER_MINOR = 6
 
 # ----------------------------------------------
 # Memory Configuration

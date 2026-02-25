@@ -1,0 +1,200 @@
+#!/usr/bin/expect -f
+#========================================================
+# Test: Altair BASIC 3.2 standalone smoke test
+#========================================================
+# Builds and boots standalone BASIC, answers prompts,
+# verifies PRINT output, a multi-line program, and
+# Ctrl-C break.
+#========================================================
+
+package require Tcl 8.5
+
+set script_dir [file dirname [info script]]
+set project_dir [file normalize "$script_dir/.."]
+set hex_file "$project_dir/build/basic.hex"
+
+# Parse Z80PACK_DIR from config.mk.sim
+set config_file "$project_dir/config.mk.sim"
+set z80pack_dir ""
+set fp [open $config_file r]
+while {[gets $fp line] >= 0} {
+    if {[regexp {^Z80PACK_DIR\s*=\s*(\S+)} $line -> val]} {
+        set z80pack_dir $val
+    }
+}
+close $fp
+
+if {$z80pack_dir eq ""} {
+    puts "ERROR: Could not find Z80PACK_DIR in $config_file"
+    exit 1
+}
+
+if {[string index $z80pack_dir 0] ne "/"} {
+    set z80pack_dir [file normalize "$project_dir/$z80pack_dir"]
+}
+set cpmsim "$z80pack_dir/cpmsim/cpmsim"
+
+# --- Counters ---
+set pass_count 0
+set fail_count 0
+log_user 0
+
+proc pass {desc} {
+    global pass_count
+    incr pass_count
+    puts "  ok: $desc"
+}
+
+proc fail {desc} {
+    global fail_count
+    incr fail_count
+    puts "  FAIL: $desc"
+}
+
+proc cleanup {} {
+    global spawn_id pass_count fail_count
+    catch { close -i $spawn_id; wait -i $spawn_id }
+    set total [expr {$pass_count + $fail_count}]
+    puts "  --- $pass_count/$total passed ---"
+    if {$fail_count > 0} { exit 1 }
+    exit 0
+}
+
+# Helper: boot BASIC, handle prompts, return at OK.
+# mem_input: value to send at MEMORY SIZE (empty string = press Enter for auto-detect)
+proc boot_basic {mem_input} {
+    global hex_file cpmsim spawn_id
+    set cpmsim_dir [file dirname $cpmsim]
+    cd $cpmsim_dir
+    spawn $cpmsim -8 -m 00 -x $hex_file
+    # Altair BASIC strings have high bit set on last char (e.g., 'K'|0x80 = 0xCB).
+    # Force binary encoding so expect treats each byte as one character.
+    fconfigure $spawn_id -encoding binary
+
+    set timeout 10
+
+    # Wait for MEMORY SIZE prompt
+    expect {
+        -re {MEMORY SIZ} {}
+        timeout { fail "Timeout waiting for MEMORY SIZE"; cleanup }
+        eof { fail "cpmsim exited during boot"; cleanup }
+    }
+    send "$mem_input\r"
+
+    # Wait for TERMINAL WIDTH prompt
+    expect {
+        -re {TERMINAL WIDT} {}
+        timeout { fail "Timeout waiting for TERMINAL WIDTH"; cleanup }
+        eof { fail "cpmsim exited"; cleanup }
+    }
+    send "\r"
+
+    # Handle optional function prompts (WANT SIN?, WANT RND?, WANT SQR?)
+    # Bit 7 is stripped by B_PUTCHAR, so strings appear as clean ASCII.
+    set fn_count 0
+    set done 0
+    while {!$done} {
+        expect {
+            "WANT " {
+                incr fn_count
+                send "N\r"
+            }
+            "BYTES FREE" {
+                set done 1
+            }
+            timeout {
+                fail "Timeout waiting for BYTES FREE"
+                cleanup
+            }
+            eof {
+                fail "cpmsim exited"
+                cleanup
+            }
+        }
+    }
+
+    # Wait for OK prompt
+    expect {
+        "OK" {}
+        timeout { fail "Timeout waiting for OK"; cleanup }
+    }
+
+    return $fn_count
+}
+
+# Build BASIC first
+cd $project_dir
+if {[catch {exec make basic CONFIG=config.mk.sim 2>@1} build_result]} {
+    puts "  FAIL: Build failed: $build_result"
+    exit 1
+}
+pass "Build standalone BASIC"
+
+#========================================================
+# Test 1: Boot with explicit memory size
+#========================================================
+set fn [boot_basic "32768"]
+pass "Boot with explicit memory size (answered $fn prompts)"
+
+# Test PRINT 2+2
+send "PRINT 2+2\r"
+expect {
+    -re { 4} { pass "PRINT 2+2 = 4" }
+    timeout { fail "Timeout waiting for PRINT result"; cleanup }
+    eof { fail "cpmsim exited"; cleanup }
+}
+expect "OK"
+
+# Test a multi-line program
+send "NEW\r"
+expect "OK"
+send "10 A=0\r"
+expect "OK"
+send "20 A=A+1\r"
+expect "OK"
+send "30 IF A=5 THEN GOTO 50\r"
+expect "OK"
+send "40 GOTO 20\r"
+expect "OK"
+send "50 PRINT A\r"
+expect "OK"
+send "RUN\r"
+expect {
+    -re { 5} { pass "Multi-line program prints 5" }
+    timeout { fail "Timeout waiting for program output"; cleanup }
+    eof { fail "cpmsim exited"; cleanup }
+}
+expect "OK"
+
+# Test Ctrl-C break during a running program.
+# Altair BASIC 3.2 returns to OK prompt on Ctrl-C (no "BREAK" message).
+send "NEW\r"
+expect "OK"
+send "10 GOTO 10\r"
+expect "OK"
+send "RUN\r"
+after 500
+send "\x03"
+expect {
+    "OK" { pass "Ctrl-C break works" }
+    timeout { fail "Timeout waiting for OK after Ctrl-C"; cleanup }
+}
+
+# Clean up first session
+catch { close -i $spawn_id; wait -i $spawn_id }
+
+#========================================================
+# Test 2: Boot with Enter (auto-detect memory)
+#========================================================
+set fn [boot_basic ""]
+pass "Boot with auto-detect memory (answered $fn prompts)"
+
+send "PRINT 2+2\r"
+expect {
+    -re { 4} { pass "Auto-detect: PRINT 2+2 = 4" }
+    timeout { fail "Timeout waiting for PRINT result (auto-detect)"; cleanup }
+    eof { fail "cpmsim exited"; cleanup }
+}
+
+cd $project_dir
+cleanup
