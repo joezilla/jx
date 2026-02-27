@@ -1,10 +1,11 @@
 # JX Monitor
 
-A machine-language monitor for Intel 8080, written entirely in 8080 assembly. Provides interactive memory inspection, testing, and program execution. Runs on the z80pack simulator and targets Altair/IMSAI-style hardware.
+A machine-language monitor and BASIC interpreter for Intel 8080, written entirely in 8080 assembly. Provides interactive memory inspection, testing, program execution, and Altair BASIC 3.2. Runs on the z80pack simulator and targets Altair/IMSAI-style hardware.
 
 ## Features
 
 - Pure Intel 8080 assembly -- no C compiler required
+- Altair BASIC 3.2 (4K edition) -- standalone boot or loadable via monitor
 - Interactive monitor with hex dump, memory test, write, go, and I/O port commands
 - Dual output: serial console AND VDM-1 memory-mapped video display
 - Memory detection at boot (32KB--64KB)
@@ -68,6 +69,43 @@ F400: F3 31 00 F4 21 D1 FD CD  D1 F4 21 F8 FD CD D1 F4  .1..!.....!.....
 > g 0100
 ```
 
+## Altair BASIC
+
+JX includes Altair BASIC 3.2 (4K edition) by Bill Gates, Paul Allen, and Monte Davidoff. This is the numeric-only version -- no string variables (`A$`), only numeric (`A`, `A1`, etc.).
+
+When `ENABLE_BASIC=1` (the default), `make run` boots directly into BASIC:
+
+```
+MEMORY SIZE?
+TERMINAL WIDTH?
+WANT SIN? N
+WANT RND? N
+WANT SQR? N
+
+3029 BYTES FREE
+
+BASIC VERSION 3.2
+[4K VERSION]
+
+OK
+PRINT 2+2
+ 4
+
+OK
+```
+
+Press Enter at MEMORY SIZE? and TERMINAL WIDTH? to accept defaults. Answering Y to SIN/RND/SQR includes those math functions (uses more memory).
+
+### BASIC Build Targets
+
+```bash
+make basic           # Build standalone BASIC (boots directly)
+make basic-loadable  # Build loadable BASIC (load via monitor 'l' command)
+make run-basic       # Build and run standalone BASIC in simulator
+make run             # Same as run-basic when ENABLE_BASIC=1
+make disk            # Create boot disk image
+```
+
 ## Memory Layout (64KB)
 
 ```
@@ -95,37 +133,58 @@ Programs loaded at 0100H can return to the monitor via `JMP 0000H`.
 
 ```bash
 make            # Build monitor (Intel HEX)
-make run        # Build and run in simulator
+make run        # Build and run in simulator (BASIC if enabled)
+make basic      # Build standalone BASIC
+make disk       # Create boot disk image
+make test       # Run test suite
 make clean      # Remove build artifacts
 make info       # Show configuration
 make help       # Show build targets
 ```
 
-### Memory Configurations
+### Using an Alternate Config
+
+Two configs are provided: `config.mk` (IMSAI hardware) and `config.mk.sim` (cpmsim simulator). Override with `CONFIG=`:
 
 ```bash
-make MEM_SIZE=32    # Monitor at 7400H
-make MEM_SIZE=48    # Monitor at B400H
-make MEM_SIZE=64    # Monitor at F400H (default)
+make run CONFIG=config.mk.sim
 ```
 
-### Disabling Video
+## Configuration (config.mk)
 
-```bash
-make VIDEO_BASE=0   # Serial-only build
-```
+All hardware and build options are set in `config.mk`. Key settings:
+
+| Option | Default (IMSAI) | Simulator | Description |
+|--------|-----------------|-----------|-------------|
+| `SIO_DATA` | `12H` | `01H` | Serial data port |
+| `SIO_STATUS` | `13H` | `00H` | Serial status port |
+| `SIO_RX_MASK` | `02H` | `0FFH` | RX ready bitmask |
+| `SIO_TX_MASK` | `01H` | `0` | TX ready bitmask (0 = no poll) |
+| `SIO_8251` | `1` | `0` | Enable 8251 USART init sequence |
+| `MEM_SIZE` | `48` | `64` | RAM size in KB (32, 48, or 64) |
+| `BIOS_BASE` | `0` | `0` | Monitor ORG address (0 = flat binary) |
+| `VIDEO_BASE` | `0CC00H` | `0` | VDM-1 base address (0 = disabled) |
+| `ENABLE_BASIC` | `1` | `1` | Include Altair BASIC (0 or 1) |
+| `ENABLE_TERM` | `0` | `0` | Include terminal mode (0 or 1) |
+
+Secondary serial port (`SIO2_*`) and video geometry (`VIDEO_COLS`, `VIDEO_ROWS`, `VIDEO_CTRL`) are also configurable. See `config.mk` for the full list.
 
 ## Project Structure
 
 ```
 jx/
 ├── Makefile            Build rules
-├── config.mk           Toolchain paths and hardware options
+├── config.mk           Hardware config (IMSAI)
+├── config.mk.sim       Hardware config (cpmsim simulator)
 ├── src/
 │   ├── bios/
 │   │   ├── bios.asm    System entry point (includes everything)
 │   │   ├── serial.asm  Serial console driver
 │   │   └── video.asm   VDM-1 video driver
+│   ├── basic/
+│   │   ├── altair_basic.asm       Altair BASIC 3.2 (4K)
+│   │   ├── basic_standalone.asm   Standalone entry point
+│   │   └── basic_loadable.asm     Loadable entry point
 │   ├── lib/
 │   │   ├── print.asm   Output formatting (hex, decimal, strings)
 │   │   └── string.asm  String operations (strlen, strcmp, etc.)
@@ -171,4 +230,4 @@ See `docs/Z80ASM_BUGS.md` for details.
 
 ---
 
-*JX Monitor -- Pure Intel 8080 Assembly*
+*JX Monitor + Altair BASIC -- Pure Intel 8080 Assembly*
