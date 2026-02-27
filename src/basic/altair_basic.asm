@@ -1344,20 +1344,28 @@ L082C   PUSH PSW	;Preserve exponent diff
         CALL FMantissaRtOnce;Shift mantissa one place right
         JMP FRoundUp	;Jump ahead.
 FSubMantissas
-        XRA A	;B=0-B
-        SUB B	;
-        MOV B,A	;
-        MOV A,M	;E=(FACCUM)-E
-        SBB E	;
-        MOV E,A	;
-        INX H	;
-        MOV A,M	;D=(FACCUM+1)-D
-        SBB D
+        XRA A	;B=0-B (HL=FACCUM on entry)
+        SUB B	;carry_1
+        STA ARITH_TMP	;save result (no flag effect)
+        LDA FACCUM	;load (FACCUM+0) (no flag effect)
+        SBB E	;(FACCUM)-E, carry_2
+        STA ARITH_TMP+1	;save result
+        LDA FACCUM+1	;load (FACCUM+1)
+        SBB D	;(FACCUM+1)-D, carry_3
+        STA ARITH_TMP+2	;save result
+        LDA FACCUM+2	;load (FACCUM+2)
+        SBB C	;(FACCUM+2)-C, carry_4
+        STA ARITH_TMP+3	;save result
+        PUSH PSW	;save carry_4 for CC FNegateInt
+        LDA ARITH_TMP	;restore B
+        MOV B,A
+        LDA ARITH_TMP+1	;restore E
+        MOV E,A
+        LDA ARITH_TMP+2	;restore D
         MOV D,A
-        INX H
-        MOV A,M	;C=(FACCUM+2)-C
-        SBB C	;
-        MOV C,A	;
+        LDA ARITH_TMP+3	;restore C
+        MOV C,A
+        POP PSW	;restore carry_4 (sign flag)
 FNormalise
         CC FNegateInt	;
         MVI H,00H	;
@@ -1379,7 +1387,7 @@ NormLoop
         MOV A,H	;Get shift count for exponent adjustment
         LXI H,FACCUM+3	;
         ADD M	;
-        MOV M,A	;Since A was a -ve number, that certainly should
+        STA FACCUM+3	;(no flag effect, preserves carry+zero)
         JNC FZero	;have carried, hence the extra check for zero.
         RZ	;?why?
 FRoundUp
@@ -1395,15 +1403,32 @@ FRoundUp
         MOV C,A	;
         JMP FLoadFromBCDE	;Exit via copying BCDE to FACCUM.
 FMantissaLeft
+        ;Pre-save E,D,C to memory (MOV clobbers carry on this CPU)
         MOV A,E
-        RAL
-        MOV E,A
+        STA ARITH_TMP
         MOV A,D
-        RAL
-        MOV D,A
+        STA ARITH_TMP+1
         MOV A,C
-        ADC A
+        STA ARITH_TMP+2
+        ;Shift chain with LDA/STA only (preserves carry)
+        LDA ARITH_TMP	;load E
+        RAL	;carry_1 = MSB of E
+        STA ARITH_TMP	;save shifted E
+        LDA ARITH_TMP+1	;load D (carry_1 preserved)
+        RAL	;carry_2
+        STA ARITH_TMP+1
+        LDA ARITH_TMP+2	;load C (carry_2 preserved)
+        ADC A	;carry_3
+        STA ARITH_TMP+2
+        ;Restore registers
+        PUSH PSW	;save carry_3
+        LDA ARITH_TMP
+        MOV E,A
+        LDA ARITH_TMP+1
+        MOV D,A
+        LDA ARITH_TMP+2
         MOV C,A
+        POP PSW	;restore carry_3
         RET
 FMantissaInc
         INR E
@@ -1419,17 +1444,27 @@ Overflow
         MVI E,0AH
         JMP Error
 FAddMantissas
-        MOV A,M
-        ADD E
-        MOV E,A
-        INX H
-        MOV A,M
-        ADC D
-        MOV D,A
-        INX H
-        MOV A,M
-        ADC C
-        MOV C,A
+        MOV A,M	;load first byte
+        ADD E	;carry_1
+        PUSH PSW	;save result + carry_1
+        MOV E,A	;save result to E
+        INX H	;advance HL
+        MOV A,M	;load next byte (clobbers carry_1)
+        STA ARITH_TMP	;park value (no flag effect)
+        POP PSW	;restore carry_1
+        LDA ARITH_TMP	;reload value (carry_1 preserved)
+        ADC D	;carry_2
+        PUSH PSW	;save result + carry_2
+        MOV D,A	;save result to D
+        INX H	;advance HL
+        MOV A,M	;load next byte (clobbers carry_2)
+        STA ARITH_TMP	;park value
+        POP PSW	;restore carry_2
+        LDA ARITH_TMP	;reload value (carry_2 preserved)
+        ADC C	;carry_3
+        PUSH PSW	;save carry_3 for caller's JNC test
+        MOV C,A	;save result to C
+        POP PSW	;restore carry_3
         RET
 FNegateInt
         LXI H,FTEMP
@@ -1461,18 +1496,40 @@ RtMultLoop
         CALL FMantissaRtOnce
         JMP RtMultLoop
 FMantissaRtOnce
-        MOV A,C
-        RAR
-        MOV C,A
+        MOV A,C	;load C (1 byte, normal entry)
+FMantRtSkipC	;entry when A already has C value
+        ;Pre-save all four bytes to memory
+        STA ARITH_TMP	;save C/A
         MOV A,D
-        RAR
-        MOV D,A
+        STA ARITH_TMP+1
         MOV A,E
+        STA ARITH_TMP+2
+        MOV A,B
+        STA ARITH_TMP+3
+        ;Shift chain (LDA/STA preserve carry)
+        LDA ARITH_TMP	;load C
         RAR
+        STA ARITH_TMP
+        LDA ARITH_TMP+1	;load D (carry preserved)
+        RAR
+        STA ARITH_TMP+1
+        LDA ARITH_TMP+2	;load E (carry preserved)
+        RAR
+        STA ARITH_TMP+2
+        LDA ARITH_TMP+3	;load B (carry preserved)
+        RAR
+        STA ARITH_TMP+3
+        ;Restore registers
+        PUSH PSW	;save final carry
+        LDA ARITH_TMP
+        MOV C,A
+        LDA ARITH_TMP+1
+        MOV D,A
+        LDA ARITH_TMP+2
         MOV E,A
-        MOV A,B	;NB: B is the extra
-        RAR	;mantissa byte.
-        MOV B,A	;
+        LDA ARITH_TMP+3
+        MOV B,A
+        POP PSW	;restore carry
         RET	;
 FMul    POP B	;Get lhs in BCDE
         POP D	;
@@ -1500,22 +1557,27 @@ FMulOuterLoop
         MVI L,08H	;8 bits to do
 FMulInnerLoop
         RAR	;Test lowest bit of mantissa byte
+        JNC L0919_SKIP	;test carry before MOV clobbers it
         MOV H,A	;Preserve mantissa byte
         MOV A,C	;A=result mantissa's high byte
-        JNC L0919	;If that bit of multiplicand was 0, then skip over adding mantissas.
         PUSH H	;
         LXI H,0000H	;
         DAD D	;
         POP D	;
-        ACI 00	;A=result mantissa high byte. This gets back to C
-        XCHG	;in the call to FMantissaRtOnce+1.
-L0919   CALL FMantissaRtOnce+1
+        ACI 00	;A=result mantissa high byte -> C via FMantRtSkipC
+        XCHG	;
+        JMP L0919
+L0919_SKIP
+        MOV H,A	;Preserve mantissa byte
+        MOV A,C	;A=result mantissa's high byte
+L0919   CALL FMantRtSkipC
         DCR L
-        MOV A,H	;Restore mantissa byte and
-        JNZ FMulInnerLoop	;jump back if L is not yet 0.
+        JZ PopHLandReturn	;exit if done (test Z before MOV)
+        MOV A,H	;Restore mantissa byte
+        JMP FMulInnerLoop	;loop
 PopHLandReturn
         POP H	;Restore FACCUM ptr
-        RET	;Return to FMulOuterLoop, or if finished that then exit to FNormalise
+        RET	;Return to FMulOuterLoop, or finish to FNormalise
 FDivByTen
         CALL FPush	;
         LXI B,8420H	;BCDE=(float)10;
@@ -1595,7 +1657,7 @@ L0971   POP B
 FExponentAdd
         MOV A,B
         ORA A
-        JZ FExponentAdd+31
+        JZ FExpAdd_ZeroExp
         MOV A,L	;A=0 for add, FF for subtract.
         LXI H,FACCUM+3	;
         XRA M	;XOR with FAccum's exponent.
@@ -1603,15 +1665,18 @@ FExponentAdd
         MOV B,A	;
         RAR	;Carry (after the add) into bit 7.
         XRA B	;XOR with old bit 7.
+        JP FExpAdd_NoOvf	;test sign before MOV clobbers it
         MOV A,B	;
-        JP FExponentAdd+30	;If
         ADI 80H
-        MOV M,A
+        STA FACCUM+3	;(no flag effect, preserves zero)
         JZ PopHLandReturn
         CALL FUnpackMantissas
         MOV M,A
         DCX H
         RET
+FExpAdd_NoOvf
+        MOV A,B	;restore A=B for the ORA A path
+FExpAdd_ZeroExp
         ORA A
         POP H	;Ignore return address so we'll end
         JM Overflow
@@ -1771,8 +1836,10 @@ FAsInteger
         PUSH H
         CALL FCopyToBCDE
         CALL FUnpackMantissas
-        XRA M	;Get sign back
-        MOV H,A
+        XRA M	;Get sign back (sets sign flag)
+        PUSH PSW	;save A + sign flag
+        MOV H,A	;save value to H (clobbers flags)
+        POP PSW	;restore sign flag
         CM FMantissaDec
         MVI A,98H
         SUB B	;by (24-exponent) places?
@@ -1954,21 +2021,36 @@ NextDigit
         CALL FCopyToBCDE	;Store BCDE to FACCUM.
         POP H	;HL=>decimal power.
         MVI B,'0'-1	;
+        ;Pre-save CDE to ARITH_TMP for carry-safe loop
+        MOV A,E
+        STA ARITH_TMP
+        MOV A,D
+        STA ARITH_TMP+1
+        MOV A,C
+        STA ARITH_TMP+2
 DigitLoop
-        INR B	;
-        MOV A,E	;
-        SUB M	;
-        MOV E,A	;
-        INX H	;
-        MOV A,D	;
-        SBB M	;
-        MOV D,A	;
-        INX H	;
-        MOV A,C	;
-        SBB M	;
-        MOV C,A	;
-        DCX H	;
-        DCX H	;
+        INR B
+        LDA ARITH_TMP	;load E (no flag effect)
+        SUB M	;E-(HL), carry_1
+        STA ARITH_TMP	;save result
+        INX H
+        LDA ARITH_TMP+1	;load D (carry_1 preserved)
+        SBB M	;D-(HL)-borrow, carry_2
+        STA ARITH_TMP+1
+        INX H
+        LDA ARITH_TMP+2	;load C (carry_2 preserved)
+        SBB M	;C-(HL)-borrow, carry_3
+        STA ARITH_TMP+2
+        PUSH PSW	;save carry_3
+        LDA ARITH_TMP
+        MOV E,A
+        LDA ARITH_TMP+1
+        MOV D,A
+        LDA ARITH_TMP+2
+        MOV C,A
+        POP PSW	;restore carry_3
+        DCX H
+        DCX H
         JNC DigitLoop	;
         CALL FAddMantissas	;
         INX H	;???
@@ -2188,7 +2270,7 @@ MemProbeCheck
         JNZ     FindMemTopLoop  ; HL != 0: keep probing
         JMP     DoneMemSize     ; HL wrapped to 0: stop
         ENDIF
-        DS 0DB3H - $    ; NOP fill to 0DB3H (was hw detect code)
+        ; (NOP fill removed: FP carry-chain fixes grew code past 0DB3H)
 ;--- end Init patch ---
 InitBasicVars
         LXI H,0FFFFH	;
@@ -2340,5 +2422,7 @@ szMemorySize
 
 UnusedMemory
         DB 00
+
+ARITH_TMP DB 00H,00H,00H,00H	;temp for carry-safe arithmetic
 
 BASIC_END:
