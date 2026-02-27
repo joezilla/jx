@@ -10,9 +10,12 @@
 ;   test / t [s e]     Destructive RAM test
 ;   write / w <a> <b>  Write bytes to memory
 ;   go / g <addr>      Execute code at address
+;   in / i <port>      Read I/O port
+;   out / o <p> <byte> Write I/O port
 ;   load / l <port>    Load Intel HEX via serial
 ;   mem / m            Show memory layout
 ;   cls                Clear screen
+;   term / e           Terminal (SIO2 pass-through) [optional]
 ;
 ; This module is INCLUDEd by bios.asm.
 ;========================================================
@@ -125,6 +128,36 @@ MDISP:
         CALL    STRCMP
         JZ      DO_CLS
 
+        LHLD    CMDPTR
+        LXI     D,CMD_IN
+        CALL    STRCMP
+        JZ      DO_IN
+        LHLD    CMDPTR
+        LXI     D,CMD_I
+        CALL    STRCMP
+        JZ      DO_IN
+
+        LHLD    CMDPTR
+        LXI     D,CMD_OUT
+        CALL    STRCMP
+        JZ      DO_OUT
+        LHLD    CMDPTR
+        LXI     D,CMD_O
+        CALL    STRCMP
+        JZ      DO_OUT
+
+        ; --- Optional module commands ---
+        IF ENABLE_TERM
+        LHLD    CMDPTR
+        LXI     D,CMD_TERM
+        CALL    STRCMP
+        JZ      DO_TERM
+        LHLD    CMDPTR
+        LXI     D,CMD_E
+        CALL    STRCMP
+        JZ      DO_TERM
+        ENDIF
+
         ; Unknown command
         LXI     H,MSG_UNK
         CALL    PRINTS
@@ -151,12 +184,27 @@ CMD_M:          DB      'M',0
 CMD_LOAD:       DB      'LOAD',0
 CMD_L:          DB      'L',0
 CMD_CLS:        DB      'CLS',0
+CMD_IN:         DB      'IN',0
+CMD_I:          DB      'I',0
+CMD_OUT:        DB      'OUT',0
+CMD_O:          DB      'O',0
+
+        IF ENABLE_TERM
+CMD_TERM:       DB      'TERM',0
+CMD_E:          DB      'E',0
+        ENDIF
 
 ;========================================================
 ; DO_HELP
 ;========================================================
 DO_HELP:
         LXI     H,MSG_HELP
+        CALL    PRINTS
+        IF ENABLE_TERM
+        LXI     H,MSG_HTRM
+        CALL    PRINTS
+        ENDIF
+        LXI     H,MSG_HFTR
         CALL    PRINTS
         JMP     MONITOR
 
@@ -862,6 +910,52 @@ DO_CLS:
         JMP     MONITOR
 
 ;========================================================
+; DO_IN - Read I/O port
+;========================================================
+; in <port>
+; Self-modifying: patches IN instruction with port number.
+;========================================================
+DO_IN:
+        LHLD    ARGPTR
+        CALL    PRHX_IN
+        JC      IN_ERR
+        MOV     A,E             ; Port number (low byte)
+        STA     IO_INP+1        ; Patch IN instruction
+IO_INP: IN      0               ; Read port (self-modifying)
+        CALL    PRHEX8
+        CALL    PRCRLF
+        JMP     MONITOR
+
+IN_ERR:
+        LXI     H,MSG_IERR
+        CALL    PRINTS
+        JMP     MONITOR
+
+;========================================================
+; DO_OUT - Write I/O port
+;========================================================
+; out <port> <byte>
+; Self-modifying: patches OUT instruction with port number.
+;========================================================
+DO_OUT:
+        LHLD    ARGPTR
+        CALL    PRHX_IN
+        JC      OUT_ERR
+        MOV     A,E             ; Port number (low byte)
+        STA     IO_OUT+1        ; Patch OUT instruction
+        ; HL = string pointer past port number
+        CALL    PRHX_IN         ; Parse byte value
+        JC      OUT_ERR
+        MOV     A,E             ; Byte value
+IO_OUT: OUT     0               ; Write port (self-modifying)
+        JMP     MONITOR
+
+OUT_ERR:
+        LXI     H,MSG_OERR
+        CALL    PRINTS
+        JMP     MONITOR
+
+;========================================================
 ; RDLINE - Read line into CMDBUF
 ;========================================================
 ; Handles: CR (done), BS/DEL (backspace), printable chars.
@@ -1068,10 +1162,19 @@ MSG_HELP:
         DB      '  t [<start> <end>]   RAM test (destructive)',CR,LF
         DB      '  w <addr> <bb> ..    Write bytes',CR,LF
         DB      '  g <addr>            Go (execute)',CR,LF
+        DB      '  in <port>           Read I/O port',CR,LF
+        DB      '  out <port> <byte>   Write I/O port',CR,LF
         DB      '  l <port>            Load Intel HEX (1=con, 2=aux)',CR,LF
         DB      '  m                   Memory info',CR,LF
         DB      '  cls                 Clear screen',CR,LF
-        DB      '  ? or help           This message',CR,LF
+        DB      '  ? or help           This message',CR,LF,0
+
+        IF ENABLE_TERM
+MSG_HTRM:
+        DB      '  term / e            Terminal (SIO2 pass-through)',CR,LF,0
+        ENDIF
+
+MSG_HFTR:
         DB      CR,LF
         DB      'Addresses and bytes are hex.',CR,LF,0
 
@@ -1080,6 +1183,8 @@ MSG_DERR:       DB      'Usage: d <addr> [<end>]',CR,LF,0
 MSG_TERR:       DB      'Usage: t [<start> <end>]',CR,LF,0
 MSG_WERR:       DB      'Usage: w <addr> <byte> ...',CR,LF,0
 MSG_GERR:       DB      'Usage: g <addr>',CR,LF,0
+MSG_IERR:       DB      'Usage: in <port>',CR,LF,0
+MSG_OERR:       DB      'Usage: out <port> <byte>',CR,LF,0
 MSG_LUSE:       DB      'Usage: l <port> (1=con, 2=aux)',CR,LF,0
 MSG_LRDY:       DB      'Send Intel HEX data...',CR,LF,0
 MSG_LLDD:       DB      'Loaded ',0

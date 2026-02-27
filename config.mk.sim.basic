@@ -35,16 +35,16 @@ SIM_FLAGS = -8 -m 00
 #   SIO_DATA=012H  SIO_STATUS=013H  SIO_RX_MASK=02H  SIO_TX_MASK=01H
 #   Bit 1 = RX ready, Bit 0 = TX ready.
 #
-SIO_DATA    = 12H
-SIO_STATUS  = 13H
-SIO_RX_MASK = 02H
-SIO_TX_MASK = 01H
-SIO_8251   = 1
+SIO_DATA    = 01H
+SIO_STATUS  = 00H
+SIO_RX_MASK = 0FFH
+SIO_TX_MASK = 0
+SIO_8251   = 0
 
-# SIO Channel B (auxiliary serial port)
-SIO2_DATA    = 14H
-SIO2_STATUS  = 15H
-SIO2_RX_MASK = 02H
+# SIO Channel B (disabled for simulator)
+SIO2_DATA    = 0
+SIO2_STATUS  = 0
+SIO2_RX_MASK = 0
 
 # ----------------------------------------------
 # Optional Modules

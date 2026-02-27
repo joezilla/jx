@@ -5,10 +5,10 @@ A machine-language monitor for Intel 8080, written entirely in 8080 assembly. Pr
 ## Features
 
 - Pure Intel 8080 assembly -- no C compiler required
-- Interactive monitor with hex dump, memory test, write, and go commands
+- Interactive monitor with hex dump, memory test, write, go, and I/O port commands
 - Dual output: serial console AND VDM-1 memory-mapped video display
 - Memory detection at boot (32KB--64KB)
-- Single flat binary (~2.7KB), assembled from one source file
+- Single flat binary (~3.5KB with video, ~3.1KB serial-only), assembled from one source file
 - Builds to Intel HEX for direct simulator loading
 
 ## Quick Start
@@ -43,6 +43,9 @@ JX Monitor Commands:
   t [<start> <end>]   RAM test (destructive)
   w <addr> <bb> ..    Write bytes
   g <addr>            Go (execute)
+  in <port>           Read I/O port
+  out <port> <byte>   Write I/O port
+  l <port>            Load Intel HEX (1=con, 2=aux)
   m                   Memory info
   cls                 Clear screen
   ? or help           This message
@@ -53,7 +56,7 @@ All addresses and byte values are hexadecimal.
 ### Example Session
 
 ```
-JX/8080 Monitor v0.3
+JX/8080 Monitor v0.4
 Scanning: ********
 Memory: 64KB
 Video: VDM-1 64x16 at C000
@@ -71,7 +74,7 @@ F400: F3 31 00 F4 21 D1 FD CD  D1 F4 21 F8 FD CD D1 F4  .1..!.....!.....
 0000-00FF  Page Zero (JMP MONITOR at 0000H)
 0100-BFFF  Free RAM (~48KB)
 C000-C3FF  VDM-1 video framebuffer (64x16)
-F400-FFFF  Monitor (~3KB)
+F400-FFFF  Monitor (~3.5KB)
 ```
 
 Programs loaded at 0100H can return to the monitor via `JMP 0000H`.

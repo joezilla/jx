@@ -1,6 +1,6 @@
 # JX Monitor -- Design Specification
 
-## Version 0.3
+## Version 0.4
 
 This document defines the architecture of JX, an interactive machine-language monitor for Intel 8080 computers.
 
@@ -13,7 +13,7 @@ This document defines the architecture of JX, an interactive machine-language mo
 - **Simplicity**: Single flat binary, no layers or abstraction beyond hardware drivers
 - **Utility**: Practical tool for inspecting and manipulating memory on an 8080 system
 - **Dual output**: All display output to both serial console and VDM-1 video
-- **Small footprint**: Fits in ~3KB at the top of RAM
+- **Small footprint**: Fits in ~3.5KB at the top of RAM
 
 ### 1.2 Non-Goals
 
@@ -63,7 +63,7 @@ JX uses polled I/O. Interrupts are disabled at boot (`DI`).
              Available for user programs via 'go' command
 C000-C3FF  VDM-1 video framebuffer (if enabled)
              64 columns x 16 rows = 1024 bytes
-F400-FFFF  Monitor code + data (~3KB)
+F400-FFFF  Monitor code + data (~3.5KB)
              Includes: boot, serial, video, print, string, monitor
 ```
 
@@ -100,6 +100,7 @@ bios.asm          Boot, PUTCHAR, GETCHAR, MEMPROBE
   INCLUDE print.asm     PRINTS, PRCRLF, PRHEX8, PRHEX16, PRDEC16
   INCLUDE string.asm    STRLEN, STRCMP, STRCPY, STRTOUPPER
   INCLUDE monitor.asm   MONITOR, CMD_DUMP, CMD_TEST, CMD_WRITE, etc.
+  INCLUDE cmd/term.asm  DO_TERM (optional, ENABLE_TERM=1)
 ```
 
 ### 4.2 Boot Sequence
@@ -136,8 +137,12 @@ All print routines (PRINTS, PRHEX16, PRCRLF, etc.) call PUTCHAR, so all output a
 | `t` / `test` | `t [<start> <end>]` | Destructive RAM test (complement pattern) |
 | `w` / `write` | `w <addr> <bb> ...` | Write hex bytes to memory |
 | `g` / `go` | `g <addr>` | Execute code at address |
+| `l` / `load` | `l <port>` | Load Intel HEX via serial (1=con, 2=aux) |
 | `m` / `mem` | `m` | Show memory layout and detected RAM |
+| `in` / `i` | `in <port>` | Read I/O port and display value |
+| `out` / `o` | `out <port> <byte>` | Write byte to I/O port |
 | `cls` | `cls` | Clear screen (ANSI escape + video clear) |
+| `term` / `e` | `term` | Terminal emulator (SIO2 pass-through) [optional] |
 | `?` / `help` | `?` | Show command list |
 
 ### 5.1 Hex Dump Format
@@ -177,6 +182,30 @@ Video support is conditional on `VIDEO_BASE` being nonzero. Building with `VIDEO
 
 ---
 
+## 6a. Optional Command Modules
+
+### 6a.1 Module Pattern
+
+Optional commands live in `src/cmd/<name>.asm`. Each module follows this recipe:
+
+1. **Source file** wrapped in `IF ENABLE_<NAME>` / `ENDIF` (self-gating)
+2. **Flag** in `config.mk` (`ENABLE_<NAME> = 1`) and `config.mk.sim` (`= 0`)
+3. **Makefile** conditional `-dENABLE_<NAME>` in `MOD_DEFINES`
+4. **bios.asm** `IFNDEF` default (EQU 0) + unconditional `INCLUDE`
+5. **monitor.asm** IF-gated dispatch entries, command strings, and help text
+
+### 6a.2 Terminal Emulator (`term` / `e`)
+
+Transparent serial pass-through to SIO Channel B. Enabled with `ENABLE_TERM=1` in `config.mk`.
+
+- Initializes SIO2 (8251 USART) on entry
+- Console keystrokes are sent to SIO2 TX
+- SIO2 RX data is displayed on the console via PUTCHAR
+- ESC (1BH) exits back to monitor
+- ~200 bytes (code + dispatch + strings)
+
+---
+
 ## 7. Serial Subsystem
 
 ### 7.1 cpmsim Console
@@ -199,6 +228,8 @@ src/
 │   ├── bios.asm        System entry, boot, PUTCHAR, GETCHAR, MEMPROBE
 │   ├── serial.asm      Serial console driver (ports 0/1)
 │   └── video.asm       VDM-1 video driver (C000H)
+├── cmd/
+│   └── term.asm        Terminal emulator (optional, ENABLE_TERM)
 ├── lib/
 │   ├── print.asm       PRINTS, PRCRLF, PRHEX8, PRHEX16, PRDEC8, PRDEC16
 │   └── string.asm      STRLEN, STRCMP, STRCPY, STRTOUPPER
@@ -214,6 +245,7 @@ src/
 | 0.1 | 2026-01-22 | Initial CP/M-style architecture |
 | 0.2 | 2026-01-31 | Added CCP, BDOS, assembly library |
 | 0.3 | 2026-02-13 | Rewrite as flat monitor OS; removed CP/M layers |
+| 0.4 | 2026-02-19 | Added I/O port commands (in/out), Intel HEX loader, VDM-1 video |
 
 ---
 

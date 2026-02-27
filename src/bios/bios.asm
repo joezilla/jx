@@ -35,6 +35,19 @@
         ORG     BIOS_BASE
 
 ;========================================================
+; BIOS Jump Table (for external programs)
+;========================================================
+; Fixed entry points at BIOS_BASE+0, +3, +6, +9.
+; Only assembled when BIOS_BASE > 0 (traditional layout).
+;========================================================
+        IF BIOS_BASE
+BJMP_WBOOT:     JMP     WBOOT           ; BIOS_BASE+0
+BJMP_CONST:     JMP     CONST           ; BIOS_BASE+3
+BJMP_GETCHAR:   JMP     GETCHAR         ; BIOS_BASE+6
+BJMP_PUTCHAR:   JMP     PUTCHAR         ; BIOS_BASE+9
+        ENDIF
+
+;========================================================
 ; ASCII Constants
 ;========================================================
 CR              EQU     0DH
@@ -175,6 +188,10 @@ MPRBLP:
         MOV     A,H
         ORA     A               ; H=0 means wrapped past 64KB
         JZ      MPRBDN
+        IF VIDEO_BASE
+        CPI     VIDEO_BASE / 256
+        JNC     MPRBDN          ; Don't probe into video/device area
+        ENDIF
 
         MOV     A,M             ; Read current value
         MOV     B,A             ; Save
@@ -374,6 +391,13 @@ PRDT3:
 DETECTED_MEM:   DW      0       ; Detected memory top
 
 ;========================================================
+; Optional module defaults
+;========================================================
+        IFNDEF ENABLE_TERM
+ENABLE_TERM     EQU     0
+        ENDIF
+
+;========================================================
 ; Include sub-modules
 ;========================================================
         INCLUDE serial.asm
@@ -381,6 +405,7 @@ DETECTED_MEM:   DW      0       ; Detected memory top
         INCLUDE ../lib/print.asm
         INCLUDE ../lib/string.asm
         INCLUDE ../monitor.asm
+        INCLUDE ../cmd/term.asm
 
 ;========================================================
 ; Boot Messages

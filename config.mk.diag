@@ -1,6 +1,8 @@
-# JX Monitor - Toolchain Configuration
+# JX Monitor - Diagnostic Configuration
 # ======================================
-# Edit this file to configure paths and hardware options.
+# IMSAI hardware ports with TX busy-wait DISABLED.
+# Used to isolate TX flow-control as a hang cause.
+# Build: make clean && make basic CONFIG=config.mk.diag
 
 # ----------------------------------------------
 # z80pack Installation Path
@@ -26,14 +28,9 @@ SIM_FLAGS = -8 -m 00
 # ----------------------------------------------
 # Serial Configuration
 # ----------------------------------------------
-# cpmsim (simulator):
-#   SIO_DATA=01H  SIO_STATUS=00H  SIO_RX_MASK=0FFH  SIO_TX_MASK=0
-#   Status port returns FFH (ready) or 00H (not ready).
-#   No TX busy-wait needed.
-#
-# IMSAI SIO (8251 USART, real hardware):
-#   SIO_DATA=012H  SIO_STATUS=013H  SIO_RX_MASK=02H  SIO_TX_MASK=01H
-#   Bit 1 = RX ready, Bit 0 = TX ready.
+# IMSAI SIO ports but with TX busy-wait disabled (SIO_TX_MASK=0).
+# 8251 init still runs. RX polling still works.
+# Only change vs config.mk: SIO_TX_MASK = 0
 #
 SIO_DATA    = 12H
 SIO_STATUS  = 13H
@@ -65,23 +62,12 @@ VER_MINOR = 6
 # ----------------------------------------------
 MEM_SIZE = 48
 
-# Override BIOS_BASE to place monitor at a specific address.
-# Leave blank to auto-derive from MEM_SIZE (top of RAM).
-# Set to 0 for a flat binary loaded at address 0000H.
 BIOS_BASE = 0
-
-# Override STACK_TOP to place the stack at a specific address.
-# Leave blank to auto-compute:
-#   BIOS_BASE > 0: stack just below monitor (= BIOS_BASE)
-#   BIOS_BASE = 0: stack at top of RAM (= MEMTOP)
 STACK_TOP =
 
 # ----------------------------------------------
 # Video Configuration
 # ----------------------------------------------
-# Processor Technology VDM-1
-# 64 columns x 16 rows at C000H
-# Set VIDEO_BASE=0 to disable video support
 VIDEO_BASE = 0CC00H
 VIDEO_CTRL = 0C8H
 VIDEO_COLS = 64

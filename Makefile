@@ -59,17 +59,49 @@ ifneq ($(VIDEO_BASE),0)
     HW_DEFINES += -dVIDEO_ROWS=$(VIDEO_ROWS)
 endif
 
-ALL_DEFINES = $(MEM_DEFINES) $(HW_DEFINES)
+# Optional module defines
+MOD_DEFINES =
+ifeq ($(ENABLE_TERM),1)
+    MOD_DEFINES += -dENABLE_TERM=1
+endif
+
+ALL_DEFINES = $(MEM_DEFINES) $(HW_DEFINES) $(MOD_DEFINES)
+
+# Disk image name reflects the active configuration
+ifeq ($(ENABLE_BASIC),1)
+    DISK_LABEL = basic
+else ifeq ($(ENABLE_TERM),1)
+    DISK_LABEL = term
+else
+    DISK_LABEL = monitor
+endif
+DIST_DIR = dist
+SYSTEM_DSK = $(DIST_DIR)/jx-$(DISK_LABEL).dsk
 
 # Source files
 BIOS_SRCS = $(wildcard $(BIOS_DIR)/*.asm) \
             $(wildcard $(SRC_DIR)/lib/*.asm) \
-            $(wildcard $(SRC_DIR)/*.asm)
+            $(wildcard $(SRC_DIR)/*.asm) \
+            $(wildcard $(SRC_DIR)/cmd/*.asm)
+
+# BASIC source files and output
+BASIC_DIR = $(SRC_DIR)/basic
+BASIC_SRCS = $(wildcard $(BASIC_DIR)/*.asm)
+BASIC_HEX = $(BUILD_DIR)/basic.hex
+BASIC_LOAD_HEX = $(BUILD_DIR)/basic-load.hex
+
+# BASIC defines (standalone includes BIOS drivers)
+BASIC_STANDALONE_DEFINES = $(HW_DEFINES) $(MEM_DEFINES) -dBASIC_STANDALONE=1
+# Loadable: BIOS already running, just needs jump table addresses
+BASIC_LOAD_DEFINES = $(HW_DEFINES) $(MEM_DEFINES) -dBASIC_STANDALONE=0
+
+# BAS_MEM_TOP: uses default from altair_basic.asm (0F1AH minimum threshold)
 
 # ----------------------------------------------
 # Targets
 # ----------------------------------------------
 .PHONY: all hex disk clean distclean run test help check-tools info dirs
+.PHONY: basic basic-loadable run-basic
 
 all: dirs check-tools $(SYSTEM_BIN)
 	@echo "Build complete: $(SYSTEM_BIN)"
@@ -79,6 +111,9 @@ all: dirs check-tools $(SYSTEM_BIN)
 	@echo "  Serial:     data=$(SIO_DATA) status=$(SIO_STATUS) rx=$(SIO_RX_MASK) tx=$(SIO_TX_MASK)"
 ifneq ($(VIDEO_BASE),0)
 	@echo "  Video:      $(VIDEO_BASE) ($(VIDEO_COLS)x$(VIDEO_ROWS))"
+endif
+ifeq ($(ENABLE_TERM),1)
+	@echo "  Modules:    term"
 endif
 
 hex: dirs check-tools $(SYSTEM_HEX)
@@ -131,20 +166,34 @@ $(SYSTEM_HEX): $(BIOS_SRCS) | dirs
 	@cd $(BIOS_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_HEX) $(ALL_DEFINES) -o$(CURDIR)/$@ bios.asm
 
 # Create boot disk image
+ifeq ($(ENABLE_BASIC),1)
+disk: basic
+	@mkdir -p $(DIST_DIR)
+	@echo "DISK $(BASIC_HEX) -> $(SYSTEM_DSK)"
+	@node scripts/create-boot-disk.js --8inch -o $(SYSTEM_DSK) $(BASIC_HEX)
+else
 disk: hex
+	@mkdir -p $(DIST_DIR)
 	@echo "DISK $(SYSTEM_HEX) -> $(SYSTEM_DSK)"
 	@node scripts/create-boot-disk.js --8inch -o $(SYSTEM_DSK) $(SYSTEM_HEX)
+endif
 
+ifeq ($(ENABLE_BASIC),1)
+run: basic
+	@echo "Starting Altair BASIC..."
+	@$(SIMULATOR) $(SIM_FLAGS) -x $(BASIC_HEX)
+else
 run: hex
 	@echo "Starting JX Monitor..."
 	@$(SIMULATOR) $(SIM_FLAGS) -x $(SYSTEM_HEX)
+endif
 
 test:
 	@./tests/run-tests.sh
 
 clean:
 	rm -f $(BUILD_DIR)/*.bin $(BUILD_DIR)/*.hex $(BUILD_DIR)/*.lis
-	rm -f $(SYSTEM_DSK)
+	rm -rf $(DIST_DIR)
 	rm -f $(SRC_DIR)/**/*.lis
 
 distclean:
@@ -174,3 +223,30 @@ ifneq ($(VIDEO_BASE),0)
 endif
 	@echo ""
 	@echo "Assembler defines: $(ALL_DEFINES)"
+
+# ----------------------------------------------
+# BASIC Targets
+# ----------------------------------------------
+
+# Standalone BASIC (boots directly into BASIC)
+basic: dirs check-tools $(BASIC_HEX)
+	@echo "Build complete: $(BASIC_HEX)"
+
+$(BASIC_HEX): $(BASIC_SRCS) $(BIOS_SRCS) | dirs
+	@echo "ASM  basic_standalone.asm -> $@"
+	@cd $(BASIC_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_HEX) \
+	    $(BASIC_STANDALONE_DEFINES) -o$(CURDIR)/$@ basic_standalone.asm
+
+# Loadable BASIC (load via monitor 'l' command, run with 'g 0')
+basic-loadable: dirs check-tools $(BASIC_LOAD_HEX)
+	@echo "Build complete: $(BASIC_LOAD_HEX)"
+
+$(BASIC_LOAD_HEX): $(BASIC_SRCS) | dirs
+	@echo "ASM  basic_loadable.asm -> $@"
+	@cd $(BASIC_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_HEX) \
+	    $(BASIC_LOAD_DEFINES) -o$(CURDIR)/$@ basic_loadable.asm
+
+# Run standalone BASIC in simulator
+run-basic: basic
+	@echo "Starting Altair BASIC..."
+	@$(SIMULATOR) $(SIM_FLAGS) -x $(BASIC_HEX)

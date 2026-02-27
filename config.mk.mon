@@ -52,7 +52,7 @@ SIO2_RX_MASK = 02H
 ENABLE_TERM = 0
 
 # BASIC: 0=none, 1=standalone boot, 2=build loadable hex
-ENABLE_BASIC = 1
+ENABLE_BASIC = 0
 
 # ----------------------------------------------
 # Version

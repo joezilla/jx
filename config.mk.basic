@@ -82,7 +82,8 @@ STACK_TOP =
 # Processor Technology VDM-1
 # 64 columns x 16 rows at C000H
 # Set VIDEO_BASE=0 to disable video support
-VIDEO_BASE = 0CC00H
+VIDEO_BASE = 0
+# VIDEO_BASE = 0CC00H
 VIDEO_CTRL = 0C8H
 VIDEO_COLS = 64
 VIDEO_ROWS = 16
