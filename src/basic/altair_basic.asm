@@ -1472,18 +1472,27 @@ FNegateInt
         CMA
         MOV M,A
         XRA A
-        MOV L,A
-        SUB B
-        MOV B,A
-        MOV A,L
-        SBB E
-        MOV E,A
-        MOV A,L
-        SBB D
-        MOV D,A
-        MOV A,L
-        SBB C
+        STA ARITH_TMP	;ARITH_TMP = 0
+        MOV L,A	;L = 0 (for compatibility)
+        SUB B	;carry_1
+        STA ARITH_TMP+1	;save 0-B
+        LDA ARITH_TMP	;load 0 (carry_1 preserved)
+        SBB E	;carry_2
+        STA ARITH_TMP+2	;save result
+        LDA ARITH_TMP	;load 0 (carry_2 preserved)
+        SBB D	;carry_3
+        STA ARITH_TMP+3	;save result
+        LDA ARITH_TMP	;load 0 (carry_3 preserved)
+        SBB C	;carry_4
+        PUSH PSW	;save SBB C result + flags
         MOV C,A
+        LDA ARITH_TMP+1
+        MOV B,A
+        LDA ARITH_TMP+2
+        MOV E,A
+        LDA ARITH_TMP+3
+        MOV D,A
+        POP PSW	;restore flags from SBB C
         RET
 FMantissaRtMult
         MVI B,00H	;Initialise extra mantissa byte
@@ -1593,42 +1602,57 @@ FDiv    POP B
         INR M
         DCX H
         MOV A,M
-        STA L095F+1
+        STA FDiv_SBI2+1
         DCX H
         MOV A,M
-        STA L095F-3
+        STA FDiv_SBI1+1
         DCX H
         MOV A,M
-        STA L095F-7
+        STA FDiv_SUI+1
         MOV B,C
         XCHG
         XRA A
         MOV C,A
         MOV D,A
         MOV E,A
-        STA L095F+4
+        STA FDiv_MVI+1
 FDivLoop
         PUSH H
         PUSH B
-        MOV A,L
-        SUI 00H
-        MOV L,A
+        ;Pre-save H and B for flag-safe loading
         MOV A,H
-        SBI 00
-        MOV H,A
+        STA ARITH_TMP	;save H
         MOV A,B
-L095F   SBI 00
-        MOV B,A
-        MVI A,00H
-        SBI 00
+        STA ARITH_TMP+1	;save B
+        ;Subtract chain with flag-safe loads
+        MOV A,L
+FDiv_SUI SUI 00H	;carry_1 (immediate patched at runtime)
+        STA ARITH_TMP+2	;save L result (carry_1 preserved)
+        LDA ARITH_TMP	;load H (carry_1 preserved)
+FDiv_SBI1 SBI 00	;carry_2
+        STA ARITH_TMP	;save H result (carry_2 preserved)
+        LDA ARITH_TMP+1	;load B (carry_2 preserved)
+FDiv_SBI2 SBI 00	;carry_3
+        STA ARITH_TMP+1	;save B result (carry_3 preserved)
+FDiv_MVI MVI A,00H	;flag-safe (immediate patched at runtime)
+        SBI 00	;carry_4 (carry_3 preserved through STA + MVI)
         CMC
-        JNC L0971
-        STA L095F+4H
-        POP PSW
-        POP PSW
+        JNC FDiv_Restore	;borrow -> restore originals from stack
+        ;No borrow: accept subtraction results
+        STA FDiv_MVI+1	;update extended byte
+        POP PSW	;discard saved BC
+        POP PSW	;discard saved HL
+        ;Load modified results into registers
+        LDA ARITH_TMP+2
+        MOV L,A
+        LDA ARITH_TMP
+        MOV H,A
+        LDA ARITH_TMP+1
+        MOV B,A
         STC
-        DB 0D2H	;JNC ....
-L0971   POP B
+        DB 0D2H	;JNC skip (carry=1 from STC, not taken)
+FDiv_Restore
+        POP B
         POP H
         MOV A,C
         INR A
@@ -1637,13 +1661,17 @@ L0971   POP B
         JM FRoundUp+1
         RAL
         CALL FMantissaLeft
-        DAD H
         MOV A,B
-        RAL
-        MOV B,A
-        LDA L095F+4H
-        RAL
-        STA L095F+4H
+        STA ARITH_TMP	;pre-save B (before DAD H)
+        DAD H	;carry_1 from HL shift
+        LDA ARITH_TMP	;A = B (carry_1 preserved)
+        RAL	;carry_2
+        STA ARITH_TMP	;save rotated B (carry_2 preserved)
+        LDA FDiv_MVI+1	;load extended byte (carry_2 preserved)
+        RAL	;carry_3
+        STA FDiv_MVI+1	;save extended (carry_3 not needed after)
+        LDA ARITH_TMP
+        MOV B,A	;restore rotated B (flags don't matter)
         MOV A,C
         ORA D
         ORA E
@@ -1983,7 +2011,7 @@ ToOver100000
         LXI B,9143H	;BCDE=(float)100,000.
         LXI D,4FF8H	;
         CALL FCompare	;If FACCUM >= 100,000
-        JPO PrepareToPrint	;then jump to PrepareToPrint.
+        JP  PrepareToPrint	;then jump to PrepareToPrint.
         POP PSW	;A=DecExpAdj
         CALL DecimalShiftUp+1	;FACCUM*=10; DecExpAdj--;
         PUSH PSW	;
@@ -2099,7 +2127,7 @@ ToUnder1000000
         LXI D,23F7H	;
         CALL FCompare	;
         POP H	;
-        JPO L0B71	;
+        JP  L0B71	;
         PCHL	;
 ONE_HALF
         DB 00H,00H,00H,80H	; DD 0.5
@@ -2371,12 +2399,16 @@ InitProgramBase
         SHLD BAS_STKTOP
         XCHG
         CALL CheckEnoughMem
-        MOV A,E
-        SUB L
-        MOV L,A
         MOV A,D
-        SBB H
+        STA ARITH_TMP	;pre-save D (no flag effect)
+        MOV A,E
+        SUB L	;carry_1 = borrow from low byte
+        STA ARITH_TMP+1	;save low result (no flag effect)
+        LDA ARITH_TMP	;load D (carry_1 preserved)
+        SBB H	;correct high-byte subtract with borrow
         MOV H,A
+        LDA ARITH_TMP+1
+        MOV L,A	;restore low result
         LXI B,0FFF0H
         DAD B
         CALL NewLine
