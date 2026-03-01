@@ -64,8 +64,7 @@ Video: VDM-1 64x16 at C000
 
 Type ? for help.
 > d F400 F40F
-F400: F3 31 00 F4 21 D1 FD CD  D1 F4 21 F8 FD CD D1 F4  .1..!.....!.....
-> w 0100 C3 00 00
+F400: F3 31 00 F4 21 D1 FD CD  D1 F4 21 F8 FD CD D1 F4 
 > g 0100
 ```
 
@@ -120,9 +119,16 @@ Programs loaded at 0100H can return to the monitor via `JMP 0000H`.
 ## Hardware
 
 ### Serial Console
-- **cpmsim**: status on port 0, data on port 1 (no UART init needed)
-- **IMSAI SIO-2**: Intel 8251 USART on ports 12H/13H (auto-initialized at boot)
-- **Altair 88-2SIO**: Motorola 6850 ACIA on ports 7CH/7DH (auto-initialized at boot)
+
+Three serial configurations are supported (select via config files):
+
+| Config | UART Chip | Data/Status Ports | RX Mask | TX Mask | Init |
+|--------|-----------|-------------------|---------|---------|------|
+| cpmsim | None | 01H / 00H | FFH | 0 (no poll) | None |
+| IMSAI SIO-2 | Intel 8251 | 12H / 13H | 02H (bit 1) | 01H (bit 0) | `SIO_8251=1` |
+| Altair 88-2SIO | Motorola 6850 | 11H / 10H | 01H (bit 0) | 02H (bit 1) | `SIO_6850=1` |
+
+The 8251 and 6850 have opposite RX/TX mask bit assignments. Both are auto-initialized at boot when their respective flag is set. Port addresses and masks are fully configurable via `SIO_DATA`, `SIO_STATUS`, `SIO_RX_MASK`, and `SIO_TX_MASK`.
 
 ### Video Display
 - Processor Technology VDM-1 (optional, enabled by default)
@@ -145,50 +151,58 @@ make help       # Show build targets
 
 ### Using an Alternate Config
 
-Several configs are provided:
+Three configs are provided. Each contains all three serial presets as comments -- uncomment the one matching your hardware:
 
-| Config | Hardware | UART |
-|--------|----------|------|
-| `config.mk` | IMSAI | Intel 8251 |
-| `config.mk.sim` | cpmsim simulator | None |
-| `config.mk.sio` | Altair 88-2SIO | Motorola 6850 |
-| `config.mk.diag` | IMSAI (diagnostic) | Intel 8251 |
+| Config | Default Preset | Description |
+|--------|---------------|-------------|
+| `config.mk` | Altair 88-2SIO | Primary config (real hardware) |
+| `config.mk.sim` | cpmsim | Simulator (no UART init, no TX poll) |
+| `config.mk.sio` | Altair 88-2SIO | Alternate Altair config |
 
 Override with `CONFIG=`:
 
 ```bash
-make run CONFIG=config.mk.sio
+make run CONFIG=config.mk.sim
 ```
 
 ## Configuration (config.mk)
 
-All hardware and build options are set in `config.mk`. Key settings:
+All hardware and build options are set in `config.mk`. To switch serial hardware, comment out the active preset and uncomment another. Key settings:
 
-| Option | Default (IMSAI) | Simulator | Description |
-|--------|-----------------|-----------|-------------|
-| `SIO_DATA` | `12H` | `01H` | Serial data port |
-| `SIO_STATUS` | `13H` | `00H` | Serial status port |
-| `SIO_RX_MASK` | `02H` | `0FFH` | RX ready bitmask |
-| `SIO_TX_MASK` | `01H` | `0` | TX ready bitmask (0 = no poll) |
-| `SIO_8251` | `1` | `0` | Enable 8251 USART init sequence |
-| `SIO_6850` | `0` | `0` | Enable 6850 ACIA init sequence |
-| `MEM_SIZE` | `48` | `64` | RAM size in KB (32, 48, or 64) |
-| `BIOS_BASE` | `0` | `0` | Monitor ORG address (0 = flat binary) |
-| `VIDEO_BASE` | `0CC00H` | `0` | VDM-1 base address (0 = disabled) |
-| `ENABLE_BASIC` | `1` | `1` | Include Altair BASIC (0 or 1) |
-| `ENABLE_TERM` | `0` | `0` | Include terminal mode (0 or 1) |
+### Serial Options
 
-Secondary serial port (`SIO2_*`) and video geometry (`VIDEO_COLS`, `VIDEO_ROWS`, `VIDEO_CTRL`) are also configurable. See `config.mk` for the full list.
+| Option | Description |
+|--------|-------------|
+| `SIO_DATA` | Serial data port address |
+| `SIO_STATUS` | Serial status port address |
+| `SIO_RX_MASK` | Bitmask for RX ready in status register |
+| `SIO_TX_MASK` | Bitmask for TX ready (0 = no TX poll, fire-and-forget) |
+| `SIO_8251` | Enable Intel 8251 USART init sequence at boot |
+| `SIO_6850` | Enable Motorola 6850 ACIA init sequence at boot |
+
+Secondary serial port (`SIO2_*`) uses the same options with the `SIO2_` prefix.
+
+### General Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `MEM_SIZE` | `48` | RAM size in KB (32, 48, or 64) |
+| `BIOS_BASE` | `0` | Monitor ORG address (0 = flat binary at address 0) |
+| `STACK_TOP` | *(auto)* | Stack address (auto = MEMTOP; set explicitly if MEM_SIZE doesn't match hardware) |
+| `VIDEO_BASE` | `0CC00H` | VDM-1 base address (0 = disabled) |
+| `ENABLE_BASIC` | `0` | Include Altair BASIC (0 or 1) |
+| `ENABLE_TERM` | `0` | Include terminal mode (0 or 1) |
+
+Video geometry (`VIDEO_COLS`, `VIDEO_ROWS`, `VIDEO_CTRL`) is also configurable. See `config.mk` for the full list.
 
 ## Project Structure
 
 ```
 jx/
 ├── Makefile            Build rules
-├── config.mk           Hardware config (IMSAI)
+├── config.mk           Hardware config (Altair 88-2SIO default)
 ├── config.mk.sim       Hardware config (cpmsim simulator)
-├── config.mk.sio       Hardware config (Altair 88-2SIO)
-├── config.mk.diag      Hardware config (IMSAI diagnostic)
+├── config.mk.sio       Hardware config (Altair 88-2SIO alternate)
 ├── src/
 │   ├── bios/
 │   │   ├── bios.asm    System entry point (includes everything)

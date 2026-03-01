@@ -71,16 +71,16 @@ SIM_FLAGS = -8 -m 00
 # Note that the RX/TX masks are exactly opposite to the Imsai SIO.
 #
 SIO_NAME    = Altair 88-2SIO
-SIO_DATA    = 07DH
-SIO_STATUS  = 07CH
+SIO_DATA    = 011H
+SIO_STATUS  = 010H
 SIO_RX_MASK = 01H
 SIO_TX_MASK = 02H
 SIO_8251   = 0
 SIO_6850   = 1
 
 # SIO Channel B (disabled for simulator)
-SIO2_DATA    = 07FH
-SIO2_STATUS  = 07EH
+SIO2_DATA    = 013H
+SIO2_STATUS  = 012H
 SIO2_RX_MASK = 01H
 SIO2_TX_MASK = 02H
 
@@ -90,7 +90,7 @@ SIO2_TX_MASK = 02H
 ENABLE_TERM = 0
 
 # BASIC: 0=none, 1=standalone boot, 2=build loadable hex
-ENABLE_BASIC = 0
+ENABLE_BASIC = 1
 
 # ----------------------------------------------
 # Version
