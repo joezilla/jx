@@ -40,6 +40,7 @@ SIO_STATUS  = 13H
 SIO_RX_MASK = 02H
 SIO_TX_MASK = 01H
 SIO_8251   = 1
+SIO_6850   = 0
 
 # SIO Channel B (auxiliary serial port)
 SIO2_DATA    = 14H

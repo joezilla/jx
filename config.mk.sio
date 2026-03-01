@@ -65,16 +65,17 @@ SIM_FLAGS = -8 -m 00
 # 
 #
 # ###################################################
-# ALTAIR SIO 
-# Significantly simpler UART that does not require initialization.
-# Note: the SIO_8251 must be off here as we need to skip the initialization part.
-# 
-SIO_NAME    = Altair SIO2
+# ALTAIR 88-2SIO (6850 ACIA)
+# Status: bit 0 = RX ready (RDRF), bit 1 = TX ready (TDRE)
+# Requires 6850 master reset + mode init at boot.
+#
+SIO_NAME    = Altair 88-2SIO
 SIO_DATA    = 07DH
 SIO_STATUS  = 07CH
 SIO_RX_MASK = 01H
 SIO_TX_MASK = 02H
 SIO_8251   = 0
+SIO_6850   = 1
 
 # SIO Channel B (disabled for simulator)
 SIO2_DATA    = 07FH

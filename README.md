@@ -120,8 +120,9 @@ Programs loaded at 0100H can return to the monitor via `JMP 0000H`.
 ## Hardware
 
 ### Serial Console
-- cpmsim console ports: status on port 0, data on port 1
-- Directly connected to the host terminal via the simulator
+- **cpmsim**: status on port 0, data on port 1 (no UART init needed)
+- **IMSAI SIO-2**: Intel 8251 USART on ports 12H/13H (auto-initialized at boot)
+- **Altair 88-2SIO**: Motorola 6850 ACIA on ports 7CH/7DH (auto-initialized at boot)
 
 ### Video Display
 - Processor Technology VDM-1 (optional, enabled by default)
@@ -144,10 +145,19 @@ make help       # Show build targets
 
 ### Using an Alternate Config
 
-Two configs are provided: `config.mk` (IMSAI hardware) and `config.mk.sim` (cpmsim simulator). Override with `CONFIG=`:
+Several configs are provided:
+
+| Config | Hardware | UART |
+|--------|----------|------|
+| `config.mk` | IMSAI | Intel 8251 |
+| `config.mk.sim` | cpmsim simulator | None |
+| `config.mk.sio` | Altair 88-2SIO | Motorola 6850 |
+| `config.mk.diag` | IMSAI (diagnostic) | Intel 8251 |
+
+Override with `CONFIG=`:
 
 ```bash
-make run CONFIG=config.mk.sim
+make run CONFIG=config.mk.sio
 ```
 
 ## Configuration (config.mk)
@@ -161,6 +171,7 @@ All hardware and build options are set in `config.mk`. Key settings:
 | `SIO_RX_MASK` | `02H` | `0FFH` | RX ready bitmask |
 | `SIO_TX_MASK` | `01H` | `0` | TX ready bitmask (0 = no poll) |
 | `SIO_8251` | `1` | `0` | Enable 8251 USART init sequence |
+| `SIO_6850` | `0` | `0` | Enable 6850 ACIA init sequence |
 | `MEM_SIZE` | `48` | `64` | RAM size in KB (32, 48, or 64) |
 | `BIOS_BASE` | `0` | `0` | Monitor ORG address (0 = flat binary) |
 | `VIDEO_BASE` | `0CC00H` | `0` | VDM-1 base address (0 = disabled) |
@@ -176,6 +187,8 @@ jx/
 ├── Makefile            Build rules
 ├── config.mk           Hardware config (IMSAI)
 ├── config.mk.sim       Hardware config (cpmsim simulator)
+├── config.mk.sio       Hardware config (Altair 88-2SIO)
+├── config.mk.diag      Hardware config (IMSAI diagnostic)
 ├── src/
 │   ├── bios/
 │   │   ├── bios.asm    System entry point (includes everything)

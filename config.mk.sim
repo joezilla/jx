@@ -40,6 +40,7 @@ SIO_STATUS  = 00H
 SIO_RX_MASK = 0FFH
 SIO_TX_MASK = 0
 SIO_8251   = 0
+SIO_6850   = 0
 
 # SIO Channel B (disabled for simulator)
 SIO2_DATA    = 0

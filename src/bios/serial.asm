@@ -13,6 +13,7 @@
 ; Presets:
 ;   cpmsim:     00H/01H, RX=FFH, TX=0 (no TX poll)
 ;   IMSAI 8251: 13H/12H, RX=02H, TX=01H
+;   MITS 6850:  7DH/7CH, RX=01H, TX=02H
 ;========================================================
 
 ;--------------------------------------------------------
@@ -36,6 +37,10 @@ SIO_TX_MASK     EQU     0
 
         IFNDEF SIO_8251
 SIO_8251        EQU     0
+        ENDIF
+
+        IFNDEF SIO_6850
+SIO_6850        EQU     0
         ENDIF
 
 ;--------------------------------------------------------
@@ -137,6 +142,18 @@ SIODLY: DCR     A               ;   4 T-states
         MVI     A,37H
         OUT     SIO_STATUS
         ENDIF
+        IF SIO_6850
+        ; 6850 ACIA Master Reset
+        MVI     A,03H           ; Bits 1:0 = 11 = Master Reset
+        OUT     SIO_STATUS
+        ; Mode: 15H = 00 010 101
+        ;   0       = RX interrupt disabled
+        ;   00      = RTS low, TX interrupt disabled
+        ;   101     = 8 data, 1 stop, no parity
+        ;   01      = /16 clock
+        MVI     A,15H
+        OUT     SIO_STATUS
+        ENDIF
         RET
 
 ;========================================================
@@ -162,6 +179,14 @@ SI2DLY: DCR     A               ;   4 T-states
         MVI     A,4EH           ; Mode: 16x baud, 8N1
         OUT     SIO2_STATUS
         MVI     A,37H           ; Cmd: TxEN, DTR, RxEN, ER, RTS
+        OUT     SIO2_STATUS
+        ENDIF
+        IF SIO_6850
+        ; 6850 ACIA Master Reset (Channel B)
+        MVI     A,03H           ; Bits 1:0 = 11 = Master Reset
+        OUT     SIO2_STATUS
+        ; Mode: 15H = 8N1, /16 clock, RTS low
+        MVI     A,15H
         OUT     SIO2_STATUS
         ENDIF
         RET
