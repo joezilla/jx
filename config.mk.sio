@@ -68,6 +68,7 @@ SIM_FLAGS = -8 -m 00
 # ALTAIR 88-2SIO (6850 ACIA)
 # Status: bit 0 = RX ready (RDRF), bit 1 = TX ready (TDRE)
 # Requires 6850 master reset + mode init at boot.
+# Note that the RX/TX masks are exactly opposite to the Imsai SIO.
 #
 SIO_NAME    = Altair 88-2SIO
 SIO_DATA    = 07DH
@@ -100,7 +101,7 @@ VER_MINOR = 6
 # ----------------------------------------------
 # Memory Configuration
 # ----------------------------------------------
-MEM_SIZE = 64
+MEM_SIZE = 48
 
 # Override BIOS_BASE to place monitor at a specific address.
 # Leave blank to auto-derive from MEM_SIZE (top of RAM).
@@ -111,7 +112,10 @@ BIOS_BASE = 0
 # Leave blank to auto-compute:
 #   BIOS_BASE > 0: stack just below monitor (= BIOS_BASE)
 #   BIOS_BASE = 0: stack at top of RAM (= MEMTOP)
-STACK_TOP =
+# Note: auto-compute with MEM_SIZE=64 gives STACK_TOP=0000H (wraps to
+# FFFFH), which is above physical RAM on a ~60KB system. Set explicitly
+# to just below the VDM-1 framebuffer.
+STACK_TOP = 0CC00H
 
 # ----------------------------------------------
 # Video Configuration
