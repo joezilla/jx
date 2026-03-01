@@ -60,6 +60,42 @@ BOOT:
         DI                      ; Disable interrupts
         LXI     SP,STACK_TOP    ; Initialize stack pointer
 
+        ; Pre-serial video heartbeat: show SIO config on screen
+        ; before touching serial (which may hang if misconfigured).
+        ; Writes directly to VDM-1 framebuffer - no driver needed.
+        IF VIDEO_BASE
+        XRA     A
+        OUT     VIDEO_CTRL      ; Initialize VDM-1 control register
+        ; Clear first line so heartbeat text is readable
+        LXI     H,VIDEO_BASE
+        MVI     C,VIDEO_COLS
+VHBCLR: MVI     M,' '
+        INX     H
+        DCR     C
+        JNZ     VHBCLR
+        LXI     H,VIDEO_BASE    ; HL = framebuffer write pointer
+        LXI     D,MSG_VHB_SIO
+        CALL    VRAW_STR
+        MVI     A,SIO_DATA
+        CALL    VRAW_HEX
+        MVI     M,'/'
+        INX     H
+        MVI     A,SIO_STATUS
+        CALL    VRAW_HEX
+        LXI     D,MSG_VHB_RX
+        CALL    VRAW_STR
+        MVI     A,SIO_RX_MASK
+        CALL    VRAW_HEX
+        LXI     D,MSG_VHB_TX
+        CALL    VRAW_STR
+        MVI     A,SIO_TX_MASK
+        CALL    VRAW_HEX
+        IF SIO_8251
+        LXI     D,MSG_VHB_8251
+        CALL    VRAW_STR
+        ENDIF
+        ENDIF
+
         ; Initialize serial port (8251 USART init if SIO_8251=1)
         CALL    SIO_INIT
 
@@ -358,6 +394,51 @@ V_PRINTS:
         ENDIF
 
 ;========================================================
+; VRAW_STR - Copy string to framebuffer (no driver needed)
+;========================================================
+; Used for pre-serial heartbeat before video driver init.
+; Input:  DE = null-terminated string, HL = framebuffer ptr
+; Output: HL advanced past written chars
+; Destroys: A, D, E
+;========================================================
+        IF VIDEO_BASE
+VRAW_STR:
+        LDAX    D
+        ORA     A
+        RZ
+        MOV     M,A
+        INX     H
+        INX     D
+        JMP     VRAW_STR
+
+;========================================================
+; VRAW_HEX - Write byte as two hex digits to framebuffer
+;========================================================
+; Input:  A = byte, HL = framebuffer ptr
+; Output: HL advanced by 2
+; Destroys: A
+;========================================================
+VRAW_HEX:
+        PUSH    PSW
+        RRC
+        RRC
+        RRC
+        RRC
+        CALL    VRAW_NIB
+        POP     PSW
+VRAW_NIB:
+        ANI     0FH
+        ADI     '0'
+        CPI     '9'+1
+        JC      VRAWN1
+        ADI     'A'-'9'-1
+VRAWN1:
+        MOV     M,A
+        INX     H
+        RET
+        ENDIF
+
+;========================================================
 ; PRDEC - Print A as decimal (0-99)
 ;========================================================
 ; Simple decimal for boot messages (memory KB).
@@ -450,6 +531,20 @@ MSG_MAP_MON:
         IF VIDEO_BASE
 MSG_MAP_VID:
         DB      '  Video',CR,LF,0
+        ENDIF
+
+; Pre-serial heartbeat messages (raw framebuffer, no CRLF)
+        IF VIDEO_BASE
+MSG_VHB_SIO:
+        DB      'JX SIO ',0
+MSG_VHB_RX:
+        DB      ' RX=',0
+MSG_VHB_TX:
+        DB      ' TX=',0
+        IF SIO_8251
+MSG_VHB_8251:
+        DB      ' 8251',0
+        ENDIF
         ENDIF
 
 ;========================================================
