@@ -516,7 +516,12 @@ Exit    LXI H,LINE_BUFFER-1	;
 Backspace
         DCR B	;Char count--;
         DCX H	;Input ptr--;
-        RST 03	;RST OutChar ;Print backspace char.
+        MVI A,08H	;BS - move cursor back
+        RST 03	;
+        MVI A,' '	;Space - erase character
+        RST 03	;
+        MVI A,08H	;BS - move cursor back again
+        RST 03	;
         JNZ InputNext	;
 ResetInput
         RST 03	;RST OutChar ;
@@ -528,13 +533,17 @@ InputNext
         CALL InputChar	;
         CPI 0DH	;
         JZ TerminateInput	;
+        CPI 08H	;BS (backspace key)?
+        JZ Backspace	;
+        CPI 7FH	;DEL (alternate backspace)?
+        JZ Backspace	;
         CPI ' '	;If < ' '
         JC InputNext	;or
         CPI 7DH	;> '}'
         JNC InputNext	;then loop back.
         CPI '@'	;
         JZ ResetInput	;
-        CPI '_'	;
+        CPI '_'	;Rubout (legacy)
         JZ Backspace	;
         MOV C,A	;
         MOV A,B	;
