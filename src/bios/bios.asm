@@ -94,9 +94,13 @@ VHBCLR: MVI     M,' '
         LXI     D,MSG_VHB_8251
         CALL    VRAW_STR
         ENDIF
+        IF SIO_6850
+        LXI     D,MSG_VHB_6850
+        CALL    VRAW_STR
+        ENDIF
         ENDIF
 
-        ; Initialize serial port (8251 USART init if SIO_8251=1)
+        ; Initialize serial port (8251 if SIO_8251, 6850 if SIO_6850)
         CALL    SIO_INIT
 
         ; Print banner via serial only (video not yet initialized)
@@ -544,6 +548,10 @@ MSG_VHB_TX:
         IF SIO_8251
 MSG_VHB_8251:
         DB      ' 8251',0
+        ENDIF
+        IF SIO_6850
+MSG_VHB_6850:
+        DB      ' 6850',0
         ENDIF
         ENDIF
 
