@@ -103,11 +103,7 @@ VHBCLR: MVI     M,' '
         ; Initialize serial port (8251 if SIO_8251, 6850 if SIO_6850)
         CALL    SIO_INIT
 
-        ; Print banner via serial only (video not yet initialized)
-        LXI     H,MSG_BANNER
-        CALL    PRMSG
-
-        ; Detect memory
+        ; Detect memory (serial only - video not yet initialized)
         LXI     H,MSG_SCAN
         CALL    PRMSG
         CALL    MEMPROBE
@@ -115,16 +111,20 @@ VHBCLR: MVI     M,' '
         LXI     H,MSG_CRLF
         CALL    PRMSG
 
-        ; Print memory size
+        ; Print memory size (serial only)
         CALL    PRMSIZ
 
         IF VIDEO_BASE
         ; Initialize video display
         CALL    V_INIT
-        LXI     H,MSG_BANNER
-        CALL    V_PRINTS        ; Video-only: banner already on serial via PRMSG
+        ENDIF
+
+        ; System banner: version + serial config (dual output)
+        CALL    PRINT_BANNER
+
+        IF VIDEO_BASE
         LXI     H,MSG_VIDEO
-        CALL    PRINTS          ; Both outputs: video info goes to serial too
+        CALL    PRINTS          ; Both outputs: video info
         ENDIF
 
         ; Set up Page Zero (only when monitor is not at address 0)
@@ -488,6 +488,7 @@ ENABLE_TERM     EQU     0
         INCLUDE serial.asm
         INCLUDE video.asm
         INCLUDE ../lib/print.asm
+        INCLUDE ../lib/banner.asm
         INCLUDE ../lib/string.asm
         INCLUDE ../monitor.asm
         INCLUDE ../cmd/term.asm
@@ -495,12 +496,6 @@ ENABLE_TERM     EQU     0
 ;========================================================
 ; Boot Messages
 ;========================================================
-MSG_BANNER:
-        DB      CR,LF
-        DB      'JX/8080 Monitor v'
-        DB      '0'+VER_MAJOR,'.','0'+VER_MINOR
-        DB      CR,LF,0
-
 MSG_MEMORY:
         DB      'Memory: ',0
 

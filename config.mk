@@ -51,17 +51,17 @@ SIM_FLAGS = -8 -m 00
 #   SIO_DATA=012H  SIO_STATUS=013H  SIO_RX_MASK=02H  SIO_TX_MASK=01H
 #   Bit 1 = RX ready, Bit 0 = TX ready.
 #
-# SIO_NAME    = IMSAI SIO2
-# SIO_DATA    = 12H
-# SIO_STATUS  = 13H
-# SIO_RX_MASK = 02H
-# SIO_TX_MASK = 01H
-# SIO_8251   = 1
+SIO_NAME    = IMSAI SIO2
+SIO_DATA    = 12H
+SIO_STATUS  = 13H
+SIO_RX_MASK = 02H
+SIO_TX_MASK = 01H
+SIO_8251   = 1
 
 # SIO Channel B (auxiliary serial port)
-# SIO2_DATA    = 14H
-# SIO2_STATUS  = 15H
-# SIO2_RX_MASK = 02H
+SIO2_DATA    = 14H
+SIO2_STATUS  = 15H
+SIO2_RX_MASK = 02H
 # 
 #
 # ###################################################
@@ -70,33 +70,27 @@ SIM_FLAGS = -8 -m 00
 # Requires 6850 master reset + mode init at boot.
 # Note that the RX/TX masks are exactly opposite to the Imsai SIO.
 #
-SIO_NAME    = Altair 88-2SIO
-SIO_DATA    = 011H
-SIO_STATUS  = 010H
-SIO_RX_MASK = 01H
-SIO_TX_MASK = 02H
-SIO_8251   = 0
-SIO_6850   = 1
+# SIO_NAME    = Altair 88-2SIO
+# SIO_DATA    = 011H
+# SIO_STATUS  = 010H
+# SIO_RX_MASK = 01H
+# SIO_TX_MASK = 02H
+# SIO_8251   = 0
+# SIO_6850   = 1
 
 # SIO Channel B (disabled for simulator)
-SIO2_DATA    = 013H
-SIO2_STATUS  = 012H
-SIO2_RX_MASK = 01H
-SIO2_TX_MASK = 02H
+# SIO2_DATA    = 013H
+# SIO2_STATUS  = 012H
+# SIO2_RX_MASK = 01H
+# SIO2_TX_MASK = 02H
 
 # ----------------------------------------------
 # Optional Modules
 # ----------------------------------------------
 ENABLE_TERM = 0
 
-# BASIC: 0=none, 1=standalone boot, 2=build loadable hex
-ENABLE_BASIC = 1
-
-# ----------------------------------------------
-# Version
-# ----------------------------------------------
-VER_MAJOR = 0
-VER_MINOR = 6
+# BASIC: 0=none, 1=4K BASIC (Palo Alto/Altair), 2=8K BASIC (IMSAI)
+ENABLE_BASIC = 0
 
 # ----------------------------------------------
 # Memory Configuration
