@@ -1,0 +1,161 @@
+#!/usr/bin/expect -f
+#========================================================
+# Test: IMSAI 8K BASIC v1.4 standalone smoke test
+#========================================================
+# Builds and boots standalone 8K BASIC, verifies PRINT
+# output, a multi-line FOR/NEXT program, and Ctrl-C break.
+#
+# 8K BASIC boot sequence:
+#   "8K VERS 1.4" → "READY" → ":" prompt
+# (No MEMORY SIZE prompt, no OK — prompt is ":")
+#========================================================
+
+package require Tcl 8.5
+
+set script_dir [file dirname [info script]]
+set project_dir [file normalize "$script_dir/.."]
+set hex_file "$project_dir/build/basic8k.hex"
+
+# Parse Z80PACK_DIR from config.mk.sim
+set config_file "$project_dir/config.mk.sim"
+set z80pack_dir ""
+set fp [open $config_file r]
+while {[gets $fp line] >= 0} {
+    if {[regexp {^Z80PACK_DIR\s*=\s*(\S+)} $line -> val]} {
+        set z80pack_dir $val
+    }
+}
+close $fp
+
+if {$z80pack_dir eq ""} {
+    puts "ERROR: Could not find Z80PACK_DIR in $config_file"
+    exit 1
+}
+
+if {[string index $z80pack_dir 0] ne "/"} {
+    set z80pack_dir [file normalize "$project_dir/$z80pack_dir"]
+}
+set cpmsim "$z80pack_dir/cpmsim/cpmsim"
+
+# --- Counters ---
+set pass_count 0
+set fail_count 0
+log_user 0
+
+proc pass {desc} {
+    global pass_count
+    incr pass_count
+    puts "  ok: $desc"
+}
+
+proc fail {desc} {
+    global fail_count
+    incr fail_count
+    puts "  FAIL: $desc"
+}
+
+proc cleanup {} {
+    global spawn_id pass_count fail_count
+    catch { close -i $spawn_id; wait -i $spawn_id }
+    set total [expr {$pass_count + $fail_count}]
+    puts "  --- $pass_count/$total passed ---"
+    if {$fail_count > 0} { exit 1 }
+    exit 0
+}
+
+# Helper: boot 8K BASIC, wait for READY and : prompt.
+proc boot_basic8k {} {
+    global hex_file cpmsim spawn_id
+    set cpmsim_dir [file dirname $cpmsim]
+    cd $cpmsim_dir
+    spawn $cpmsim -8 -m 00 -x $hex_file
+    fconfigure $spawn_id -encoding binary
+
+    set timeout 10
+
+    # Wait for version banner
+    expect {
+        "8K VERS" {}
+        timeout { fail "Timeout waiting for 8K BASIC banner"; cleanup }
+        eof { fail "cpmsim exited during boot"; cleanup }
+    }
+
+    # Wait for READY prompt
+    expect {
+        "READY" {}
+        timeout { fail "Timeout waiting for READY"; cleanup }
+        eof { fail "cpmsim exited"; cleanup }
+    }
+
+    # Wait for : prompt
+    expect {
+        ":" {}
+        timeout { fail "Timeout waiting for : prompt"; cleanup }
+        eof { fail "cpmsim exited"; cleanup }
+    }
+}
+
+# Build 8K BASIC first
+cd $project_dir
+if {[catch {exec make basic8k CONFIG=config.mk.sim 2>@1} build_result]} {
+    puts "  FAIL: Build failed: $build_result"
+    exit 1
+}
+pass "Build standalone 8K BASIC"
+
+#========================================================
+# Boot 8K BASIC
+#========================================================
+boot_basic8k
+pass "Boot 8K BASIC"
+
+# Test PRINT 2+2
+send "PRINT 2+2\r"
+expect {
+    -re { 4} { pass "PRINT 2+2 = 4" }
+    timeout { fail "Timeout waiting for PRINT result"; cleanup }
+    eof { fail "cpmsim exited"; cleanup }
+}
+expect ":"
+
+# Test a multi-line FOR/NEXT program
+send "10 FOR I=1 TO 3\r"
+expect ":"
+send "20 PRINT I\r"
+expect ":"
+send "30 NEXT I\r"
+expect ":"
+send "RUN\r"
+expect {
+    -re { 1} {}
+    timeout { fail "Timeout waiting for FOR/NEXT output"; cleanup }
+    eof { fail "cpmsim exited"; cleanup }
+}
+expect {
+    -re { 2} {}
+    timeout { fail "Timeout waiting for FOR/NEXT output (2)"; cleanup }
+    eof { fail "cpmsim exited"; cleanup }
+}
+expect {
+    -re { 3} { pass "FOR/NEXT prints 1 2 3" }
+    timeout { fail "Timeout waiting for FOR/NEXT output (3)"; cleanup }
+    eof { fail "cpmsim exited"; cleanup }
+}
+expect "READY"
+expect ":"
+
+# Test Ctrl-C break during infinite loop
+send "10 GOTO 10\r"
+expect ":"
+send "RUN\r"
+after 500
+send "\x03"
+expect {
+    "STOP" { pass "Ctrl-C break works" }
+    timeout { fail "Timeout waiting for STOP after Ctrl-C"; cleanup }
+}
+expect "READY"
+expect ":"
+
+cd $project_dir
+cleanup

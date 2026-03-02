@@ -89,7 +89,7 @@ SIO2_TX_MASK = 02H
 # ----------------------------------------------
 ENABLE_TERM = 0
 
-# BASIC: 0=none, 1=standalone boot, 2=build loadable hex
+# BASIC: 0=none, 1=4k basic 2=8k basic
 ENABLE_BASIC = 0
 
 # ----------------------------------------------
@@ -115,7 +115,8 @@ BIOS_BASE = 0
 # Note: auto-compute with MEM_SIZE=64 gives STACK_TOP=0000H (wraps to
 # FFFFH), which is above physical RAM on a ~60KB system. Set explicitly
 # to just below the VDM-1 framebuffer.
-STACK_TOP = 0CC00H
+# STACK_TOP = 0CC00H
+STACK_TOP = 
 
 # ----------------------------------------------
 # Video Configuration

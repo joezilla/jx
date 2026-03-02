@@ -2279,6 +2279,7 @@ Init    LXI SP,STACK_TOP   ; Temporary stack at physical RAM top
         IF VIDEO_BASE
         CALL V_INIT     ; Init video display
         ENDIF
+        CALL PRINT_BANNER ; JX system banner
         ENDIF
         JMP InitBasicVars ; Skip hardware detection
 ;--- MemProbeCheck: ceiling for memory auto-detect ---

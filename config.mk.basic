@@ -51,7 +51,7 @@ SIO2_RX_MASK = 02H
 # ----------------------------------------------
 ENABLE_TERM = 0
 
-# BASIC: 0=none, 1=standalone boot, 2=build loadable hex
+# BASIC: 0=none, 1=4K BASIC (Palo Alto/Altair), 2=8K BASIC (IMSAI)
 ENABLE_BASIC = 1
 
 # ----------------------------------------------

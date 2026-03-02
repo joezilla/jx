@@ -2,8 +2,8 @@
 #========================================================
 # JX Monitor Test Runner
 #========================================================
-# Builds with config.mk.sim, runs all test-*.exp files,
-# reports pass/fail summary.
+# Phase 1: Build matrix (all config x target combos)
+# Phase 2: Functional tests (cpmsim only)
 #========================================================
 
 set -e
@@ -11,12 +11,23 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# --- Build ---
+# --- Phase 1: Build Matrix ---
+echo "========================================"
+echo "Phase 1: Build Matrix Verification"
+echo "========================================"
+"$SCRIPT_DIR/test-build-matrix.sh"
+echo ""
+
+# --- Phase 2: Functional Tests ---
+echo "========================================"
+echo "Phase 2: Functional Tests (cpmsim)"
+echo "========================================"
+
+# Build monitor hex for harness-based tests
 echo "=== Building JX Monitor for cpmsim ==="
 make -C "$PROJECT_DIR" clean hex CONFIG=config.mk.sim
 echo ""
 
-# --- Run tests ---
 echo "=== Running tests ==="
 
 total=0

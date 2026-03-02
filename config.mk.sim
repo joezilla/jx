@@ -42,9 +42,9 @@ SIO_TX_MASK = 0
 SIO_8251   = 0
 
 # SIO Channel B (disabled for simulator)
-# SIO2_DATA    = 0
-# SIO2_STATUS  = 0
-# SIO2_RX_MASK = 0
+SIO2_DATA    = 0
+SIO2_STATUS  = 0
+SIO2_RX_MASK = 0
 #
 # ###################################################
 # IMSAI SIO (8251 USART, real hardware):
@@ -71,16 +71,16 @@ SIO_8251   = 0
 # Note that the RX/TX masks are exactly opposite to the Imsai SIO.
 #
 # SIO_NAME    = Altair 88-2SIO
-# SIO_DATA    = 07DH
-# SIO_STATUS  = 07CH
+# SIO_DATA    = 011H
+# SIO_STATUS  = 010H
 # SIO_RX_MASK = 01H
 # SIO_TX_MASK = 02H
 # SIO_8251   = 0
 # SIO_6850   = 1
 
 # SIO Channel B (disabled for simulator)
-# SIO2_DATA    = 07FH
-# SIO2_STATUS  = 07EH
+# SIO2_DATA    = 013H
+# SIO2_STATUS  = 012H
 # SIO2_RX_MASK = 01H
 # SIO2_TX_MASK = 02H
 
@@ -89,7 +89,7 @@ SIO_8251   = 0
 # ----------------------------------------------
 ENABLE_TERM = 0
 
-# BASIC: 0=none, 1=standalone boot, 2=build loadable hex
+# BASIC: 0=none, 1=4K BASIC (Palo Alto/Altair), 2=8K BASIC (IMSAI)
 ENABLE_BASIC = 0
 
 # ----------------------------------------------
@@ -101,7 +101,7 @@ VER_MINOR = 6
 # ----------------------------------------------
 # Memory Configuration
 # ----------------------------------------------
-MEM_SIZE = 64
+MEM_SIZE = 48
 
 # Override BIOS_BASE to place monitor at a specific address.
 # Leave blank to auto-derive from MEM_SIZE (top of RAM).
@@ -112,7 +112,10 @@ BIOS_BASE = 0
 # Leave blank to auto-compute:
 #   BIOS_BASE > 0: stack just below monitor (= BIOS_BASE)
 #   BIOS_BASE = 0: stack at top of RAM (= MEMTOP)
-STACK_TOP =
+# Note: auto-compute with MEM_SIZE=64 gives STACK_TOP=0000H (wraps to
+# FFFFH), which is above physical RAM on a ~60KB system. Set explicitly
+# to just below the VDM-1 framebuffer.
+STACK_TOP = 0CC00H
 
 # ----------------------------------------------
 # Video Configuration

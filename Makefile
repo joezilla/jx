@@ -72,6 +72,8 @@ ALL_DEFINES = $(MEM_DEFINES) $(HW_DEFINES) $(MOD_DEFINES)
 # Disk image name reflects the active configuration
 ifeq ($(ENABLE_BASIC),1)
     DISK_LABEL = basic
+else ifeq ($(ENABLE_BASIC),2)
+    DISK_LABEL = basic8k
 else ifeq ($(ENABLE_TERM),1)
     DISK_LABEL = term
 else
@@ -99,11 +101,18 @@ BASIC_LOAD_DEFINES = $(HW_DEFINES) $(MEM_DEFINES) -dBASIC_STANDALONE=0
 
 # BAS_MEM_TOP: uses default from altair_basic.asm (0F1AH minimum threshold)
 
+# 8K BASIC output files
+BASIC8K_HEX = $(BUILD_DIR)/basic8k.hex
+BASIC8K_LOAD_HEX = $(BUILD_DIR)/basic8k-load.hex
+BASIC8K_STANDALONE_DEFINES = $(HW_DEFINES) $(MEM_DEFINES) -dBASIC_STANDALONE=-1 -dJXMON=-1 -dJXMON_BEGPR=-1
+BASIC8K_LOAD_DEFINES = $(HW_DEFINES) $(MEM_DEFINES) -dBASIC_STANDALONE=0 -dJXMON=-1
+
 # ----------------------------------------------
 # Targets
 # ----------------------------------------------
 .PHONY: all hex disk clean distclean run test help check-tools info dirs
 .PHONY: basic basic-loadable run-basic
+.PHONY: basic8k basic8k-loadable
 
 all: dirs check-tools $(SYSTEM_BIN)
 	@echo "Build complete: $(SYSTEM_BIN)"
@@ -173,6 +182,11 @@ disk: basic
 	@mkdir -p $(DIST_DIR)
 	@echo "DISK $(BASIC_HEX) -> $(SYSTEM_DSK)"
 	@node scripts/create-boot-disk.js --8inch -o $(SYSTEM_DSK) $(BASIC_HEX)
+else ifeq ($(ENABLE_BASIC),2)
+disk: basic8k
+	@mkdir -p $(DIST_DIR)
+	@echo "DISK $(BASIC8K_HEX) -> $(SYSTEM_DSK)"
+	@node scripts/create-boot-disk.js --8inch -o $(SYSTEM_DSK) $(BASIC8K_HEX)
 else
 disk: hex
 	@mkdir -p $(DIST_DIR)
@@ -184,6 +198,10 @@ ifeq ($(ENABLE_BASIC),1)
 run: basic
 	@echo "Starting Altair BASIC..."
 	@$(SIMULATOR) $(SIM_FLAGS) -x $(BASIC_HEX)
+else ifeq ($(ENABLE_BASIC),2)
+run: basic8k
+	@echo "Starting IMSAI 8K BASIC..."
+	@$(SIMULATOR) $(SIM_FLAGS) -x $(BASIC8K_HEX)
 else
 run: hex
 	@echo "Starting JX Monitor..."
@@ -252,3 +270,25 @@ $(BASIC_LOAD_HEX): $(BASIC_SRCS) | dirs
 run-basic: basic
 	@echo "Starting Altair BASIC..."
 	@$(SIMULATOR) $(SIM_FLAGS) -x $(BASIC_HEX)
+
+# ----------------------------------------------
+# 8K BASIC Targets
+# ----------------------------------------------
+
+# Standalone 8K BASIC (boots directly into BASIC)
+basic8k: dirs check-tools $(BASIC8K_HEX)
+	@echo "Build complete: $(BASIC8K_HEX)"
+
+$(BASIC8K_HEX): $(BASIC_SRCS) $(BIOS_SRCS) | dirs
+	@echo "ASM  basic8k_standalone.asm -> $@"
+	@cd $(BASIC_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_HEX) \
+	    $(BASIC8K_STANDALONE_DEFINES) -o$(CURDIR)/$@ basic8k_standalone.asm
+
+# Loadable 8K BASIC (load via monitor 'l' command, run with 'g 0')
+basic8k-loadable: dirs check-tools $(BASIC8K_LOAD_HEX)
+	@echo "Build complete: $(BASIC8K_LOAD_HEX)"
+
+$(BASIC8K_LOAD_HEX): $(BASIC_SRCS) | dirs
+	@echo "ASM  basic8k_loadable.asm -> $@"
+	@cd $(BASIC_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_HEX) \
+	    $(BASIC8K_LOAD_DEFINES) -o$(CURDIR)/$@ basic8k_loadable.asm
