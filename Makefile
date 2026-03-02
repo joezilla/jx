@@ -1,6 +1,10 @@
 # JX Monitor - Makefile
 # =====================
 
+# Version (single source of truth)
+VER_MAJOR = 0
+VER_MINOR = 8
+
 CONFIG ?= config.mk
 include $(CONFIG)
 
