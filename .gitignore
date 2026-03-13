@@ -26,3 +26,6 @@ test*.hex
 .DS_Store
 *.swp
 *~
+
+# Claude Code
+.claude/settings.local.json
