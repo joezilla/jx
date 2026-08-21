@@ -230,12 +230,12 @@ dirs:
 
 # Build flat binary
 # Note: cd into BIOS_DIR so INCLUDE directives resolve relative to source
-$(SYSTEM_BIN): $(BIOS_SRCS) | dirs
+$(SYSTEM_BIN): $(BIOS_SRCS) $(CONFIG) | dirs
 	@echo "ASM  bios.asm -> $@"
 	@cd $(BIOS_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_BIN) $(ALL_DEFINES) -o$(CURDIR)/$@ bios.asm
 
 # Build Intel HEX (for cpmsim -x loading)
-$(SYSTEM_HEX): $(BIOS_SRCS) | dirs
+$(SYSTEM_HEX): $(BIOS_SRCS) $(CONFIG) | dirs
 	@echo "ASM  bios.asm -> $@"
 	@cd $(BIOS_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_HEX) $(ALL_DEFINES) -o$(CURDIR)/$@ bios.asm
 
@@ -316,7 +316,7 @@ endif
 basic: dirs check-tools $(BASIC_HEX)
 	@echo "Build complete: $(BASIC_HEX)"
 
-$(BASIC_HEX): $(BASIC_SRCS) $(BIOS_SRCS) | dirs
+$(BASIC_HEX): $(BASIC_SRCS) $(BIOS_SRCS) $(CONFIG) | dirs
 	@echo "ASM  basic_standalone.asm -> $@"
 	@cd $(BASIC_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_HEX) \
 	    $(BASIC_STANDALONE_DEFINES) -o$(CURDIR)/$@ basic_standalone.asm
@@ -343,7 +343,7 @@ run-basic: basic
 basic8k: dirs check-tools $(BASIC8K_HEX)
 	@echo "Build complete: $(BASIC8K_HEX)"
 
-$(BASIC8K_HEX): $(BASIC_SRCS) $(BIOS_SRCS) | dirs
+$(BASIC8K_HEX): $(BASIC_SRCS) $(BIOS_SRCS) $(CONFIG) | dirs
 	@echo "ASM  basic8k_standalone.asm -> $@"
 	@cd $(BASIC_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_HEX) \
 	    $(BASIC8K_STANDALONE_DEFINES) -o$(CURDIR)/$@ basic8k_standalone.asm

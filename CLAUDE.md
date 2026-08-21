@@ -23,6 +23,8 @@ make CONFIG=config.mk.sim run   # Build with alternate hardware config
 
 The assembler is z80asm from z80pack (expected at `../z80pack/z80asm/z80asm`). Simulator is cpmsim at `../z80pack/cpmsim/cpmsim`.
 
+Build targets depend on `$(CONFIG)`, so editing a config file forces a reassembly and switching `CONFIG=` between builds does not need a `make clean`.
+
 ## Test Infrastructure
 
 Tests use Expect/Tcl and run against cpmsim:
@@ -32,6 +34,45 @@ Tests use Expect/Tcl and run against cpmsim:
 - `tests/test-*.exp` — individual functional tests (boot, dump, write, io, basic, etc.)
 
 Run a single test: `expect -f tests/test-boot.exp` (after building with `make hex CONFIG=config.mk.sim`)
+
+## BitsBy8 (virtual S-100 hardware testing)
+
+cpmsim cannot check hardware decoding. BitsBy8 (a local server, source at
+`../bitsby8`) boots virtual S-100 machines assembled from emulated cards — 6850
+ACIA, VDM-1, EPROM socket — so it does catch wrong ports, wrong ROM base, and
+card/config mismatches. It is the primary way to test `config.mk.rom` builds
+short of burning an EPROM.
+
+Reach it through its MCP server (`mcp__bitsby8__*` tools) or the REST API
+(`Authorization: Bearer <api-key>`; OpenAPI at `/api/docs`).
+
+The profile for this project is **JX Monitor ROM Test - 88-2SIOJP**: 8080 with
+reset vector `E000H` (stands in for the board's Jump-Start), RAM at `0000H`
+(51K) and `D000H` (4K), VDM-1 at `CC00H`/port `C8H`, an 8K EPROM card at
+`E000H`, and a `mits-88-2sio` card at basePort `10H`.
+
+Test loop:
+1. `make CONFIG=config.mk.rom` → `build/jx.bin`
+2. `burn_eprom` with `cardId: "eeprom"`, `addressing: "base"` — writes a **new
+   profile version** (earlier versions stay resolvable, so this is never
+   destructive)
+3. `create_transient_instance` with the new `profileRef` — creates and boots
+4. `read_instance_console` / `write_instance_console` — check the banner and
+   drive the monitor. Send a real CR; the literal two characters `\r` are not
+   translated.
+5. `destroy_machine_instance` — transients leave no residue
+
+Also useful: `validate_machine_profile` (port/IRQ/memory collisions plus the
+resolved memory map, before booting), `get_card_detail` (a card's port
+footprint), `list_machine_profiles`, `list_machine_instances`.
+
+**Profile settings must match the config the ROM was built from.** In
+particular the 6850 puts control/status at the EVEN address and data at the
+ODD one, so `SIO_STATUS` = the 2SIO card's `basePort` and `SIO_DATA` =
+`basePort + 1` (channel B: +2 / +3). Getting these backwards produces a
+silently dead console. The boot banner's `SIO <data>/<status>` line echoes the
+assembled ports and is the quickest check that the running image came from the
+intended config.
 
 ## Architecture
 

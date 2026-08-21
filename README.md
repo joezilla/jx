@@ -191,6 +191,86 @@ Override with `CONFIG=`:
 make run CONFIG=config.mk.sim
 ```
 
+The build depends on the config file itself, so changing a config value
+(and nothing else) still forces a reassembly. Switching `CONFIG=` between
+builds without `make clean` is safe.
+
+## Testing
+
+### cpmsim (Expect suite)
+
+```bash
+make test                       # Build matrix + functional tests
+expect -f tests/test-boot.exp   # Single test (after: make hex CONFIG=config.mk.sim)
+```
+
+The suite builds three configs x three targets, then drives cpmsim through
+`tests/harness.exp`. See `tests/run-tests.sh`.
+
+### BitsBy8 (virtual S-100 machine)
+
+[BitsBy8](https://github.com/joezilla/fdcplus-web) serves disk images to a
+real Altair over serial and boots fully virtual S-100 machines in the
+browser. It is the closest thing to the real board short of burning an
+EPROM: the monitor runs against emulated cards (6850 ACIA, VDM-1, EPROM
+socket) with the same port and memory decoding as the hardware, so it
+catches port/base-address mistakes that cpmsim cannot.
+
+A machine profile assembles the cards. The ROM build is exercised by
+**JX Monitor ROM Test - 88-2SIOJP**:
+
+| Card | Config |
+|------|--------|
+| `cpu` (`i8080-cpu`) | resetVector `E000H` -- stands in for Jump-Start |
+| `ramLow` (`ram-card`) | `0000H`, 51K (covers `DATA_BASE` and the stack) |
+| `video` (`vdm-1-video`) | base `CC00H`, dstatPort `C8H` |
+| `ramMid` (`ram-card`) | `D000H`, 4K |
+| `eeprom` (`eprom-card`) | base `E000H`, 8K (the 2764/28C64 window) |
+| `sio` (`mits-88-2sio`) | basePort `10H` -- status `10H`/`12H`, data `11H`/`13H` |
+
+Card and profile settings must agree with the config the ROM was built
+from: `BIOS_BASE`/`EEPROM_SIZE` with the EPROM card, `VIDEO_BASE`/
+`VIDEO_CTRL` with the VDM-1 card, and `SIO_STATUS`/`SIO_DATA` with the
+2SIO card's `basePort` (the 6850 puts control/status at the even address
+and data at the odd one, so `SIO_STATUS` = basePort and `SIO_DATA` =
+basePort+1).
+
+### Test loop
+
+BitsBy8 exposes an MCP server (stdio or HTTP), so the whole cycle runs
+from an AI assistant or a script without touching the web UI:
+
+1. `make CONFIG=config.mk.rom` -- build `build/jx.bin`
+2. `burn_eprom` -- load the image into the profile's `eeprom` card with
+   `addressing: "base"`. This writes a **new profile version**; earlier
+   versions stay resolvable, so a bad image is never destructive.
+3. `create_transient_instance` with the new `profileRef` -- creates and
+   boots a memory-only instance
+4. `read_instance_console` / `write_instance_console` -- check the banner
+   and drive the monitor (send a real `CR`, not the two characters `\r`)
+5. `destroy_machine_instance` -- transients leave no residue
+
+Useful companions: `list_machine_profiles`, `get_machine_profile`,
+`validate_machine_profile` (reports port/IRQ/memory collisions and the
+resolved memory map before you boot), `get_card_detail` (a card's port
+footprint and programming notes), and `list_machine_instances`.
+
+Everything above is also on the REST API (`/api/profiles/{id}/cards/{cardId}/burn`,
+`/api/instances/{id}/console`, ...) with `Authorization: Bearer <api-key>`;
+OpenAPI docs at `/api/docs`.
+
+A healthy boot on the profile above:
+
+```
+JX/8080 Version 0.9
+SIO 11/10 RX=01 TX=02 6850
+Video: VDM-1 64x16 at CC00
+  E000-F3EE  Monitor
+```
+
+The `SIO` line echoes the assembled data/status ports -- the fastest way to
+tell whether the running image was built from the config you think it was.
+
 ## Configuration (config.mk)
 
 All hardware and build options are set in `config.mk`. To switch serial hardware, comment out the active preset and uncomment another. Key settings:
@@ -247,6 +327,10 @@ jx/
 │   └── monitor.asm     Monitor command processor
 ├── scripts/
 │   └── run-boot.sh     Build and run helper
+├── tests/
+│   ├── run-tests.sh    Test runner entry point
+│   ├── harness.exp     Shared Expect framework
+│   └── test-*.exp      Functional tests (boot, dump, write, io, basic)
 ├── docs/
 │   ├── BUILD_SYSTEM.md Build system reference
 │   ├── TOOLCHAIN.md    Assembler and simulator reference
@@ -262,6 +346,8 @@ jx/
 - **[Toolchain](docs/TOOLCHAIN.md)** -- Assembler syntax and simulator usage
 - **[z80asm Bugs](docs/Z80ASM_BUGS.md)** -- Known assembler quirks
 - **[Design](DESIGN.md)** -- Architecture and memory layout
+- **[BitsBy8](https://github.com/joezilla/fdcplus-web)** -- Disk server and
+  virtual S-100 workbench used to boot-test ROM builds (see [Testing](#testing))
 
 ## Toolchain
 

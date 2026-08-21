@@ -43,17 +43,25 @@ SIM_FLAGS = -8 -m 00
 #   Status: bit 0 = RX ready (RDRF), bit 1 = TX ready (TDRE)
 #   Requires 6850 master reset + mode init at boot.
 #
+# Register order is fixed by A0: EVEN address = control/status,
+# ODD address = data. So SIO_STATUS must be the board's base port and
+# SIO_DATA base+1 (channel B: base+2 / base+3). Base 10H below is the
+# MITS default (A2-A7 strapped for octal 020), the base assumed by
+# nearly all Altair software. The bitsby8 "JX Monitor ROM Test -
+# 88-2SIOJP" profile's mits-88-2sio card is set to basePort 16 to
+# match; on real hardware set these to whatever A2-A7 are strapped to.
+#
 SIO_NAME    = 88-2SIOJP (6850 ACIA)
-SIO_DATA    = 07DH
-SIO_STATUS  = 07CH
+SIO_DATA    = 011H
+SIO_STATUS  = 010H
 SIO_RX_MASK = 01H
 SIO_TX_MASK = 02H
 SIO_8251   = 0
 SIO_6850   = 1
 
 # SIO Channel B (88-2SIOJP's second port)
-SIO2_DATA    = 07FH
-SIO2_STATUS  = 07EH
+SIO2_DATA    = 013H
+SIO2_STATUS  = 012H
 SIO2_RX_MASK = 01H
 SIO2_TX_MASK = 02H
 
