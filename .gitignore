@@ -29,3 +29,6 @@ test*.hex
 
 # Claude Code
 .claude/settings.local.json
+
+# Generated build stamp (see BUILD_STAMP in the Makefile)
+src/lib/version.inc
