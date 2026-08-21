@@ -854,6 +854,13 @@ FW_CKSUM:       DS      2       ; Firmware upload: running 16-bit checksum
 FW_TMP:         DS      2       ; Firmware upload: scratch (bounds checks)
         ENDIF
 CMDBUF:         DS      CMDBUF_SIZE     ; Command input buffer
+; IO_TRAMP holds a three-byte "IN/OUT <port> ; RET" built at
+; runtime by the monitor's in/out commands. The 8080 takes the
+; port as an immediate byte, so an arbitrary runtime port has
+; to be written into the instruction - and on a ROM build the
+; instruction cannot live with the code. DO_IN/DO_OUT write all
+; three bytes before every CALL, so it needs no initialization.
+IO_TRAMP:       DS      3       ; IN/OUT <port> ; RET (built at runtime)
 DATA_END:
 
         IF BIOS_BASE

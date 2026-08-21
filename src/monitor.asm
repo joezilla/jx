@@ -693,8 +693,10 @@ MEM_KP:
 ;========================================================
 ; l <port>   (1=console, 2=auxiliary)
 ;
-; Self-modifying code patches IN instructions to select
-; the serial port at runtime (8080 IN uses immediate addr).
+; The selected port is recorded in LD_PORT; LDIN branches
+; on it to one of two statically assembled polling loops.
+; (It used to patch the IN operands in place, which cannot
+; work when the monitor runs from ROM - see LDIN.)
 ;
 ; Register usage during record loop:
 ;   B  = running checksum
@@ -721,12 +723,6 @@ DO_LOAD:
 
         ; --- Port 1 (console) ---
 LD_P1:
-        MVI     A,SIO_STATUS
-        STA     LDST+1          ; Patch status port
-        MVI     A,SIO_RX_MASK
-        STA     LDST+3          ; Patch RX mask
-        MVI     A,SIO_DATA
-        STA     LDDT+1          ; Patch data port
         XRA     A
         STA     LD_PORT         ; 0 = console
         JMP     LD_GO
@@ -734,12 +730,6 @@ LD_P1:
         ; --- Port 2 (auxiliary) ---
 LD_P2:
         CALL    SIO2_INIT
-        MVI     A,SIO2_STATUS
-        STA     LDST+1          ; Patch status port
-        MVI     A,SIO2_RX_MASK
-        STA     LDST+3          ; Patch RX mask
-        MVI     A,SIO2_DATA
-        STA     LDDT+1          ; Patch data port
         MVI     A,1
         STA     LD_PORT         ; 1 = aux
         JMP     LD_GO
@@ -916,15 +906,39 @@ LD_PERR:
 ;========================================================
 ; LDIN - Read one byte from selected serial port
 ;========================================================
-; Self-modifying: port addresses patched by DO_LOAD.
+; Input:  LD_PORT (0 = console, 1 = auxiliary), set by
+;         DO_LOAD / DO_FW before the transfer starts.
 ; Returns: A = character (parity stripped)
 ; Destroys: A
+;
+; Two statically assembled polling loops rather than one
+; loop whose IN operands get patched at runtime: the port
+; addresses are assembly-time constants, and a patched copy
+; would sit in the ROM image on a BIOS_BASE > 0 build, where
+; the store is discarded. The unpatched template polled
+; IN 0 / ANI 0, which never leaves the loop - the monitor
+; hung with no exit but a reset.
 ;========================================================
 LDIN:
-LDST:   IN      0               ; +1 patched: status port
-        ANI     0               ; +3 patched: RX mask
-        JZ      LDIN
-LDDT:   IN      0               ; +1 patched: data port
+        LDA     LD_PORT
+        ORA     A
+        JNZ     LDIN_AUX
+
+        ; --- Port 1 (console) ---
+LDIN_CON:
+        IN      SIO_STATUS
+        ANI     SIO_RX_MASK
+        JZ      LDIN_CON
+        IN      SIO_DATA
+        ANI     7FH             ; Strip parity
+        RET
+
+        ; --- Port 2 (auxiliary) ---
+LDIN_AUX:
+        IN      SIO2_STATUS
+        ANI     SIO2_RX_MASK
+        JZ      LDIN_AUX
+        IN      SIO2_DATA
         ANI     7FH             ; Strip parity
         RET
 
@@ -1024,15 +1038,27 @@ DO_CLS:
 ; DO_IN - Read I/O port
 ;========================================================
 ; in <port>
-; Self-modifying: patches IN instruction with port number.
+;
+; The 8080's IN takes the port as an immediate byte, so a
+; runtime port number has to be written into the instruction
+; itself. The instruction is built in IO_TRAMP, three bytes
+; of the RAM variable segment, and CALLed - patching an IN
+; in place would be a store into the ROM window on a
+; BIOS_BASE > 0 build, silently discarded (and on a
+; write-enabled EEPROM, a stray byte burned into live
+; firmware).
 ;========================================================
 DO_IN:
         LHLD    ARGPTR
         CALL    PRHX_IN
         JC      IN_ERR
+        MVI     A,0DBH          ; IN opcode
+        STA     IO_TRAMP
         MOV     A,E             ; Port number (low byte)
-        STA     IO_INP+1        ; Patch IN instruction
-IO_INP: IN      0               ; Read port (self-modifying)
+        STA     IO_TRAMP+1
+        MVI     A,0C9H          ; RET
+        STA     IO_TRAMP+2
+        CALL    IO_TRAMP        ; A = port value
         CALL    PRHEX8
         CALL    PRCRLF
         JMP     MONITOR
@@ -1046,19 +1072,25 @@ IN_ERR:
 ; DO_OUT - Write I/O port
 ;========================================================
 ; out <port> <byte>
-; Self-modifying: patches OUT instruction with port number.
+;
+; Builds "OUT <port> / RET" in IO_TRAMP and calls it, for
+; the same reason as DO_IN above.
 ;========================================================
 DO_OUT:
         LHLD    ARGPTR
         CALL    PRHX_IN
         JC      OUT_ERR
+        MVI     A,0D3H          ; OUT opcode
+        STA     IO_TRAMP
         MOV     A,E             ; Port number (low byte)
-        STA     IO_OUT+1        ; Patch OUT instruction
+        STA     IO_TRAMP+1
+        MVI     A,0C9H          ; RET
+        STA     IO_TRAMP+2
         ; HL = string pointer past port number
         CALL    PRHX_IN         ; Parse byte value
         JC      OUT_ERR
         MOV     A,E             ; Byte value
-IO_OUT: OUT     0               ; Write port (self-modifying)
+        CALL    IO_TRAMP        ; Write A to port
         JMP     MONITOR
 
 OUT_ERR:
@@ -1247,7 +1279,7 @@ FINDSP:
 ;========================================================
 ; Monitor variables (CMDPTR, ARGPTR, DMP_ADDR, DMP_END,
 ; TST_SADR/EADR/CADR/ECNT, WRT_ADDR, LD_PORT/BCNT/ECNT,
-; CMDBUF) are declared in bios.asm's mutable data segment,
+; CMDBUF, IO_TRAMP) are declared in bios.asm's data segment,
 ; not here - see bios.asm's "Mutable Data Segment" section.
 ;========================================================
 

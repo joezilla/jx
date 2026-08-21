@@ -60,26 +60,18 @@ DO_FW:
         JZ      FW_P2
         JMP     FW_USE          ; Invalid port
 
-        ; --- Port 1 (console) - patches the shared LDIN
-        ; primitive exactly like DO_LOAD's port selection ---
+        ; --- Port 1 (console) - selects the shared LDIN
+        ; primitive's port exactly like DO_LOAD does ---
 FW_P1:
-        MVI     A,SIO_STATUS
-        STA     LDST+1
-        MVI     A,SIO_RX_MASK
-        STA     LDST+3
-        MVI     A,SIO_DATA
-        STA     LDDT+1
+        XRA     A
+        STA     LD_PORT         ; 0 = console
         JMP     FW_GO
 
         ; --- Port 2 (auxiliary) ---
 FW_P2:
         CALL    SIO2_INIT
-        MVI     A,SIO2_STATUS
-        STA     LDST+1
-        MVI     A,SIO2_RX_MASK
-        STA     LDST+3
-        MVI     A,SIO2_DATA
-        STA     LDDT+1
+        MVI     A,1
+        STA     LD_PORT         ; 1 = aux
         JMP     FW_GO
 
 FW_USE:
