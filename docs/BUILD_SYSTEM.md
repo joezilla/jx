@@ -20,6 +20,9 @@ The JX build system uses GNU Make with a single tool: **z80asm** from z80pack. T
 ```makefile
 Z80PACK_DIR = ../z80pack       # z80pack installation
 MEM_SIZE    = 64               # 32, 48, or 64 KB
+BIOS_BASE   = 0                # Monitor address: 0 = load at zero (default);
+                                # >0 = ROM-capable, relocated (see below)
+DATA_BASE   = 0100H            # RAM data segment (used only when BIOS_BASE > 0)
 VIDEO_BASE  = 0C000H           # VDM-1 address (0 to disable)
 VIDEO_COLS  = 64               # VDM-1 columns
 VIDEO_ROWS  = 16               # VDM-1 rows
@@ -59,10 +62,15 @@ make check-tools  # Verify z80asm is installed
 ### Build Options
 
 ```bash
-make MEM_SIZE=32        # 32KB system (monitor at 7400H)
-make MEM_SIZE=48        # 48KB system (monitor at B400H)
-make MEM_SIZE=64        # 64KB system (monitor at F400H, default)
+make MEM_SIZE=32        # 32KB system
+make MEM_SIZE=48        # 48KB system
+make MEM_SIZE=64        # 64KB system
 make VIDEO_BASE=0       # Disable VDM-1 video support
+make BIOS_BASE=0        # Load-at-zero (default) - monitor at address 0000H
+make CONFIG=config.mk.rom     # ROM-capable build (monitor relocated, e.g. for
+                               # burning into an EPROM on an 88-2SIOJP board -
+                               # see .claude/skills/88-2SIOJP.skill.md)
+make CONFIG=config.mk.sim.rom run  # Test a ROM-capable build under cpmsim
 ```
 
 ---
@@ -91,7 +99,8 @@ The Makefile `cd`s into `src/bios/` before invoking z80asm so that INCLUDE paths
 The build system passes configuration via `-d` flags:
 
 ```
--dBIOS_BASE=0F400H     Monitor load address
+-dBIOS_BASE=0           Monitor load address (0 = load at zero)
+-dDATA_BASE=0100H       RAM data segment address (used when BIOS_BASE > 0)
 -dMEM_SIZE=64           Memory size in KB
 -dVIDEO_BASE=0C000H    Video framebuffer address
 -dVIDEO_COLS=64         Video columns
@@ -102,30 +111,20 @@ The build system passes configuration via `-d` flags:
 
 ## Memory Layout
 
-### 64KB (default)
+The default build (`BIOS_BASE=0`) loads the monitor at address 0000H:
 
 ```
-0000-00FF  Page Zero (JMP MONITOR)
-0100-BFFF  Free RAM (~48KB)
-C000-C3FF  VDM-1 video framebuffer
-F400-FFFF  Monitor (~3KB)
+0000-xxxx  Monitor code + data (~3.5KB)
+xxxx-FFFF  Free RAM
+[C000-C3FF VDM-1 video framebuffer, if enabled]
 ```
 
-### 48KB
-
-```
-0000-00FF  Page Zero
-0100-B3FF  Free RAM (~45KB)
-B400-BFFF  Monitor (~3KB)
-```
-
-### 32KB
-
-```
-0000-00FF  Page Zero
-0100-73FF  Free RAM (~29KB)
-7400-7FFF  Monitor (~3KB)
-```
+Setting `BIOS_BASE` to a nonzero address (see `config.mk.rom`) relocates
+the monitor and splits it into a ROM-resident code segment plus a
+separate `DATA_BASE` RAM segment for mutable state, so it can be
+burned into a real EPROM. See `DESIGN.md` section 3 for the full
+layout and `.claude/skills/88-2SIOJP.skill.md` for the hardware side
+(EPROM socket alignment, Jump-Start switch settings).
 
 ---
 
@@ -174,7 +173,12 @@ Symbols with the same first 8 characters collide. The `-e32` flag in config.mk p
 INCLUDE resolves relative to CWD. The Makefile handles this by `cd`ing into `src/bios/`. If building manually, run z80asm from the `src/bios/` directory.
 
 ### Build output too large
-The monitor must fit between BIOS_BASE and FFFFH. For 64KB that is 3072 bytes (F400-FFFF). Check the listing file for the final address to verify the binary fits.
+With `BIOS_BASE=0`, the monitor must fit below the free-RAM boundary
+you're relying on. With `BIOS_BASE > 0` (ROM-capable), it must fit
+between `BIOS_BASE` and whatever comes next (the next EPROM/video
+boundary) - e.g. an 8KB EPROM window needs `CODE_END - BIOS_BASE` to
+stay under 8192 bytes. Check the listing file (`CODE_END`'s address)
+to verify the binary fits.
 
 ### Simulator loads nothing
 cpmsim's `-x` flag requires Intel HEX format. Flat binary (`-fb`) files have no address metadata and load 0 bytes.

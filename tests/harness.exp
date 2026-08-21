@@ -8,7 +8,7 @@
 # Provides:
 #   boot           - Spawn cpmsim, wait for prompt
 #   send_cmd       - Send command + CR
-#   expect_prompt  - Wait for "> " prompt
+#   expect_prompt  - Wait for "# " prompt
 #   capture_until_prompt - Capture output until prompt
 #   assert_contains - Check buffer contains pattern
 #   assert_eq      - Check exact equality
@@ -83,7 +83,7 @@ proc boot {} {
     set boot_output ""
     set timeout $boot_timeout
     expect {
-        -re {> $} {
+        -re {# $} {
             set boot_output $expect_out(buffer)
         }
         timeout {
@@ -106,7 +106,7 @@ proc send_cmd {cmd} {
 }
 
 #========================================================
-# expect_prompt - Wait for the "> " prompt
+# expect_prompt - Wait for the "# " prompt
 #========================================================
 # Returns: everything captured before the prompt
 #========================================================
@@ -114,7 +114,7 @@ proc expect_prompt {} {
     global cmd_timeout
     set timeout $cmd_timeout
     expect {
-        -re {> $} {
+        -re {# $} {
             return $expect_out(buffer)
         }
         timeout {

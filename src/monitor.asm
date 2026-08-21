@@ -16,6 +16,7 @@
 ;   mem / m            Show memory layout
 ;   cls                Clear screen
 ;   term / e           Terminal (SIO2 pass-through) [optional]
+;   fw <port>          Firmware update via serial [optional]
 ;
 ; This module is INCLUDEd by bios.asm.
 ;========================================================
@@ -158,6 +159,13 @@ MDISP:
         JZ      DO_TERM
         ENDIF
 
+        IF ENABLE_FWUPDATE
+        LHLD    CMDPTR
+        LXI     D,CMD_FW
+        CALL    STRCMP
+        JZ      DO_FW
+        ENDIF
+
         ; Unknown command
         LXI     H,MSG_UNK
         CALL    PRINTS
@@ -194,6 +202,10 @@ CMD_TERM:       DB      'TERM',0
 CMD_E:          DB      'E',0
         ENDIF
 
+        IF ENABLE_FWUPDATE
+CMD_FW:         DB      'FW',0
+        ENDIF
+
 ;========================================================
 ; DO_HELP
 ;========================================================
@@ -202,6 +214,10 @@ DO_HELP:
         CALL    PRINTS
         IF ENABLE_TERM
         LXI     H,MSG_HTRM
+        CALL    PRINTS
+        ENDIF
+        IF ENABLE_FWUPDATE
+        LXI     H,MSG_HFW
         CALL    PRINTS
         ENDIF
         LXI     H,MSG_HFTR
@@ -342,8 +358,9 @@ DO_TEST:
 
 TST_DEF:
         IF BIOS_BASE
-        ; Traditional: test free RAM below monitor
-        LXI     H,0100H
+        ; ROM-capable layout: test free RAM below monitor
+        ; (after the mutable data segment)
+        LXI     H,DATA_END
         SHLD    TST_SADR
         LXI     H,BIOS_BASE-1
         SHLD    TST_EADR
@@ -516,6 +533,20 @@ DO_MEM:
         LXI     H,MSG_MTOT
         CALL    PRINTS
         LHLD    DETECTED_MEM
+        IF BIOS_BASE
+        ; DETECTED_MEM = free-page count (0-256). KB = count/4.
+        MOV     A,H
+        ORA     A
+        JZ      MEM_KB
+        MVI     A,64            ; H<>0 means count=256 -> 64KB
+        JMP     MEM_KP
+MEM_KB:
+        MOV     A,L
+        RRC
+        RRC
+        ANI     03FH
+        ELSE
+        ; DETECTED_MEM = top-of-RAM address. KB = high byte/4.
         MOV     A,H
         ORA     A
         JNZ     MEM_KB
@@ -525,20 +556,35 @@ MEM_KB:
         RRC
         RRC
         ANI     03FH
+        ENDIF
 MEM_KP:
         CALL    PRDEC8
         LXI     H,MSG_MKB
         CALL    PRINTS
 
-        ; Free RAM range (computed from layout)
+        ; Free RAM range (computed from layout). The first span
+        ; ends at whichever region comes next in the address
+        ; space - the framebuffer when it sits below the ROM
+        ; window (config.mk.rom: video CC00, ROM E000), else the
+        ; ROM window itself. Running it all the way to
+        ; BIOS_BASE-1 unconditionally would wrongly report the
+        ; framebuffer as free RAM.
         LXI     H,MSG_MFRL
         CALL    PRINTS
         IF BIOS_BASE
-        LXI     H,0100H
+        LXI     H,DATA_END
         CALL    PRHEX16
         MVI     A,'-'
         CALL    PUTCHAR
+        IF VIDEO_BASE
+        IF VIDEO_BASE < BIOS_BASE
+        LXI     H,VIDEO_BASE-1
+        ELSE
         LXI     H,BIOS_BASE-1
+        ENDIF
+        ELSE
+        LXI     H,BIOS_BASE-1
+        ENDIF
         CALL    PRHEX16
         ELSE
         LXI     H,CODE_END
@@ -575,6 +621,71 @@ MEM_KP:
         CALL    PRHEX16
         CALL    PRCRLF
 
+        ; Any further free-RAM spans - only relevant for the
+        ; ROM-capable layout, where the monitor need not sit at
+        ; the top of RAM. Spans start at the end of the region
+        ; below them, never at CODE_END: the slack between
+        ; CODE_END and the end of the ROM window is still ROM
+        ; (see PRMMAP).
+        IF BIOS_BASE
+        IF VIDEO_BASE
+        IF VIDEO_BASE < BIOS_BASE
+        IF VID_END < BIOS_BASE
+        ; framebuffer below the ROM: report the gap between them
+        LXI     H,MSG_MFRL
+        CALL    PRINTS
+        LXI     H,VID_END
+        CALL    PRHEX16
+        MVI     A,'-'
+        CALL    PUTCHAR
+        LXI     H,BIOS_BASE-1
+        CALL    PRHEX16
+        LXI     H,MSG_MFRR
+        CALL    PRINTS
+        ENDIF
+        IF ROM_END
+        LXI     H,MSG_MFRL
+        CALL    PRINTS
+        LXI     H,ROM_END
+        CALL    PRHEX16
+        MVI     A,'-'
+        CALL    PUTCHAR
+        LXI     H,MEMTOP-1
+        CALL    PRHEX16
+        LXI     H,MSG_MFRR
+        CALL    PRINTS
+        ENDIF
+        ELSE
+        ; framebuffer above the ROM window
+        IF ROM_END
+        LXI     H,MSG_MFRL
+        CALL    PRINTS
+        LXI     H,ROM_END
+        CALL    PRHEX16
+        MVI     A,'-'
+        CALL    PUTCHAR
+        LXI     H,VIDEO_BASE-1
+        CALL    PRHEX16
+        LXI     H,MSG_MFRR
+        CALL    PRINTS
+        ENDIF
+        ENDIF
+        ELSE
+        IF ROM_END
+        LXI     H,MSG_MFRL
+        CALL    PRINTS
+        LXI     H,ROM_END
+        CALL    PRHEX16
+        MVI     A,'-'
+        CALL    PUTCHAR
+        LXI     H,MEMTOP-1
+        CALL    PRHEX16
+        LXI     H,MSG_MFRR
+        CALL    PRINTS
+        ENDIF
+        ENDIF
+        ENDIF
+
         JMP     MONITOR
 
 ;========================================================
@@ -582,8 +693,10 @@ MEM_KP:
 ;========================================================
 ; l <port>   (1=console, 2=auxiliary)
 ;
-; Self-modifying code patches IN instructions to select
-; the serial port at runtime (8080 IN uses immediate addr).
+; The selected port is recorded in LD_PORT; LDIN branches
+; on it to one of two statically assembled polling loops.
+; (It used to patch the IN operands in place, which cannot
+; work when the monitor runs from ROM - see LDIN.)
 ;
 ; Register usage during record loop:
 ;   B  = running checksum
@@ -610,12 +723,6 @@ DO_LOAD:
 
         ; --- Port 1 (console) ---
 LD_P1:
-        MVI     A,SIO_STATUS
-        STA     LDST+1          ; Patch status port
-        MVI     A,SIO_RX_MASK
-        STA     LDST+3          ; Patch RX mask
-        MVI     A,SIO_DATA
-        STA     LDDT+1          ; Patch data port
         XRA     A
         STA     LD_PORT         ; 0 = console
         JMP     LD_GO
@@ -623,12 +730,6 @@ LD_P1:
         ; --- Port 2 (auxiliary) ---
 LD_P2:
         CALL    SIO2_INIT
-        MVI     A,SIO2_STATUS
-        STA     LDST+1          ; Patch status port
-        MVI     A,SIO2_RX_MASK
-        STA     LDST+3          ; Patch RX mask
-        MVI     A,SIO2_DATA
-        STA     LDDT+1          ; Patch data port
         MVI     A,1
         STA     LD_PORT         ; 1 = aux
         JMP     LD_GO
@@ -805,15 +906,39 @@ LD_PERR:
 ;========================================================
 ; LDIN - Read one byte from selected serial port
 ;========================================================
-; Self-modifying: port addresses patched by DO_LOAD.
+; Input:  LD_PORT (0 = console, 1 = auxiliary), set by
+;         DO_LOAD / DO_FW before the transfer starts.
 ; Returns: A = character (parity stripped)
 ; Destroys: A
+;
+; Two statically assembled polling loops rather than one
+; loop whose IN operands get patched at runtime: the port
+; addresses are assembly-time constants, and a patched copy
+; would sit in the ROM image on a BIOS_BASE > 0 build, where
+; the store is discarded. The unpatched template polled
+; IN 0 / ANI 0, which never leaves the loop - the monitor
+; hung with no exit but a reset.
 ;========================================================
 LDIN:
-LDST:   IN      0               ; +1 patched: status port
-        ANI     0               ; +3 patched: RX mask
-        JZ      LDIN
-LDDT:   IN      0               ; +1 patched: data port
+        LDA     LD_PORT
+        ORA     A
+        JNZ     LDIN_AUX
+
+        ; --- Port 1 (console) ---
+LDIN_CON:
+        IN      SIO_STATUS
+        ANI     SIO_RX_MASK
+        JZ      LDIN_CON
+        IN      SIO_DATA
+        ANI     7FH             ; Strip parity
+        RET
+
+        ; --- Port 2 (auxiliary) ---
+LDIN_AUX:
+        IN      SIO2_STATUS
+        ANI     SIO2_RX_MASK
+        JZ      LDIN_AUX
+        IN      SIO2_DATA
         ANI     7FH             ; Strip parity
         RET
 
@@ -913,15 +1038,27 @@ DO_CLS:
 ; DO_IN - Read I/O port
 ;========================================================
 ; in <port>
-; Self-modifying: patches IN instruction with port number.
+;
+; The 8080's IN takes the port as an immediate byte, so a
+; runtime port number has to be written into the instruction
+; itself. The instruction is built in IO_TRAMP, three bytes
+; of the RAM variable segment, and CALLed - patching an IN
+; in place would be a store into the ROM window on a
+; BIOS_BASE > 0 build, silently discarded (and on a
+; write-enabled EEPROM, a stray byte burned into live
+; firmware).
 ;========================================================
 DO_IN:
         LHLD    ARGPTR
         CALL    PRHX_IN
         JC      IN_ERR
+        MVI     A,0DBH          ; IN opcode
+        STA     IO_TRAMP
         MOV     A,E             ; Port number (low byte)
-        STA     IO_INP+1        ; Patch IN instruction
-IO_INP: IN      0               ; Read port (self-modifying)
+        STA     IO_TRAMP+1
+        MVI     A,0C9H          ; RET
+        STA     IO_TRAMP+2
+        CALL    IO_TRAMP        ; A = port value
         CALL    PRHEX8
         CALL    PRCRLF
         JMP     MONITOR
@@ -935,19 +1072,25 @@ IN_ERR:
 ; DO_OUT - Write I/O port
 ;========================================================
 ; out <port> <byte>
-; Self-modifying: patches OUT instruction with port number.
+;
+; Builds "OUT <port> / RET" in IO_TRAMP and calls it, for
+; the same reason as DO_IN above.
 ;========================================================
 DO_OUT:
         LHLD    ARGPTR
         CALL    PRHX_IN
         JC      OUT_ERR
+        MVI     A,0D3H          ; OUT opcode
+        STA     IO_TRAMP
         MOV     A,E             ; Port number (low byte)
-        STA     IO_OUT+1        ; Patch OUT instruction
+        STA     IO_TRAMP+1
+        MVI     A,0C9H          ; RET
+        STA     IO_TRAMP+2
         ; HL = string pointer past port number
         CALL    PRHX_IN         ; Parse byte value
         JC      OUT_ERR
         MOV     A,E             ; Byte value
-IO_OUT: OUT     0               ; Write port (self-modifying)
+        CALL    IO_TRAMP        ; Write A to port
         JMP     MONITOR
 
 OUT_ERR:
@@ -1134,26 +1277,16 @@ FINDSP:
         JMP     FINDSP
 
 ;========================================================
-; Monitor variables
+; Monitor variables (CMDPTR, ARGPTR, DMP_ADDR, DMP_END,
+; TST_SADR/EADR/CADR/ECNT, WRT_ADDR, LD_PORT/BCNT/ECNT,
+; CMDBUF, IO_TRAMP) are declared in bios.asm's data segment,
+; not here - see bios.asm's "Mutable Data Segment" section.
 ;========================================================
-CMDPTR:         DW      0       ; Pointer to command string
-ARGPTR:         DW      0       ; Pointer to arguments
-DMP_ADDR:       DW      0       ; Dump current address
-DMP_END:        DW      0       ; Dump end address
-TST_SADR:       DW      0       ; Test start address
-TST_EADR:       DW      0       ; Test end address
-TST_CADR:       DW      0       ; Test current address
-TST_ECNT:       DW      0       ; Test error count
-WRT_ADDR:       DW      0       ; Write current address
-LD_PORT:        DB      0       ; 0=port1 (console), 1=port2 (aux)
-LD_BCNT:        DW      0       ; Total bytes loaded
-LD_ECNT:        DW      0       ; Checksum error count
-CMDBUF:         DS      CMDBUF_SIZE     ; Command input buffer
 
 ;========================================================
 ; Monitor messages
 ;========================================================
-MON_PROMPT:     DB      '> ',0
+MON_PROMPT:     DB      '# ',0
 
 MSG_HELP:
         DB      CR,LF
@@ -1174,6 +1307,11 @@ MSG_HTRM:
         DB      '  term / e            Terminal (SIO2 pass-through)',CR,LF,0
         ENDIF
 
+        IF ENABLE_FWUPDATE
+MSG_HFW:
+        DB      '  fw <port>           Firmware update (1=con, 2=aux)',CR,LF,0
+        ENDIF
+
 MSG_HFTR:
         DB      CR,LF
         DB      'Addresses and bytes are hex.',CR,LF,0
@@ -1188,6 +1326,18 @@ MSG_OERR:       DB      'Usage: out <port> <byte>',CR,LF,0
 MSG_LUSE:       DB      'Usage: l <port> (1=con, 2=aux)',CR,LF,0
 MSG_LRDY:       DB      'Send Intel HEX data...',CR,LF,0
 MSG_LLDD:       DB      'Loaded ',0
+
+        IF ENABLE_FWUPDATE
+MSG_FWUSE:      DB      'Usage: fw <port> (1=con, 2=aux)',CR,LF,0
+MSG_FWWARN:     DB      'Firmware Update - this can overwrite the running EEPROM.',CR,LF,0
+MSG_FWERR:      DB      'Upload rejected (bad checksum or out-of-range address).',CR,LF,0
+MSG_FWGAP:      DB      'Image does not start at BIOS_BASE - rejected.',CR,LF,0
+MSG_FWSUM:      DB      'Range: ',0
+MSG_FWCKS:      DB      'Checksum: ',0
+MSG_FWEPW:      DB      'Warning: first byte is not a JMP opcode - may not be a valid image.',CR,LF,0
+MSG_FWCONF:     DB      'Write to EEPROM? This overwrites the running firmware. (y/n): ',0
+MSG_FWABT:      DB      'Aborted - nothing written.',CR,LF,0
+        ENDIF
 MSG_LBYT:       DB      ' bytes, ',0
 
 MSG_TSRT:       DB      'Testing ',0

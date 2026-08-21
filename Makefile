@@ -3,7 +3,25 @@
 
 # Version (single source of truth)
 VER_MAJOR = 0
-VER_MINOR = 8
+VER_MINOR = 9
+
+# ----------------------------------------------
+# Build stamp
+# ----------------------------------------------
+# The version number alone cannot tell two builds of 0.9 apart, which makes
+# "is the image running the one I just built?" unanswerable - the question
+# that matters when burning an EPROM or uploading to a virtual machine.
+# Every build is therefore stamped with the commit it came from, a "+" when
+# the tracked tree is dirty, and the UTC build time. The stamp is written to
+# $(VERSION_INC) and printed by the boot banner.
+#
+# Untracked files do not count as dirty: this tree normally carries
+# work-in-progress files that are not part of the image.
+BUILD_SHA   := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo 0000000)
+BUILD_DIRTY := $(shell git diff --quiet HEAD 2>/dev/null || echo +)
+BUILD_TIME  := $(shell date -u +%y%m%d.%H%M)
+BUILD_STAMP := g$(BUILD_SHA)$(BUILD_DIRTY) $(BUILD_TIME)
+VERSION_INC  = $(SRC_DIR)/lib/version.inc
 
 CONFIG ?= config.mk
 include $(CONFIG)
@@ -43,8 +61,42 @@ ifeq ($(strip $(STACK_TOP)),)
     endif
 endif
 
+# DATA_BASE: RAM address for mutable state when BIOS_BASE > 0 (ROM-capable
+# builds). Unused when BIOS_BASE = 0. Defaults to 0100H, the traditional
+# start of free RAM just above Page Zero.
+ifeq ($(strip $(DATA_BASE)),)
+    DATA_BASE = 0100H
+endif
+
+# ROM_SIZE: size of the physical ROM/EPROM window at BIOS_BASE (only
+# meaningful when BIOS_BASE > 0). The monitor's code usually fills only part
+# of it, but the WHOLE window is ROM - not RAM - so memory reporting and
+# probing must skip all of it, not just up to CODE_END. Defaults to 8K, the
+# 2764/28C64 socket size used by config.mk.rom.
+ifeq ($(strip $(ROM_SIZE)),)
+    ROM_SIZE = 02000H
+endif
+
+# Firmware-update (fw command) RAM layout - only used when ENABLE_FWUPDATE=1.
+# EEPROM_SIZE is the EEPROM socket's window size (bounds-checks uploaded hex
+# and sizes the staging buffer); it defaults to ROM_SIZE since it describes
+# the same physical window. FW_STAGE_BASE holds the staged image (mirrors the
+# eventual EEPROM layout 1:1). FW_WRITER_BASE is where the small
+# self-relocating flash-writer routine runs from. All must sit in free RAM
+# clear of DATA_BASE's variables and BIOS_BASE's code/stack.
+ifeq ($(strip $(EEPROM_SIZE)),)
+    EEPROM_SIZE = $(ROM_SIZE)
+endif
+ifeq ($(strip $(FW_STAGE_BASE)),)
+    FW_STAGE_BASE = 02000H
+endif
+ifeq ($(strip $(FW_WRITER_BASE)),)
+    FW_WRITER_BASE = 04000H
+endif
+
 # Assembler defines
 MEM_DEFINES = -dBIOS_BASE=$(BIOS_BASE) -dMEM_SIZE=$(MEM_SIZE)
+MEM_DEFINES += -dDATA_BASE=$(DATA_BASE) -dROM_SIZE=$(ROM_SIZE)
 MEM_DEFINES += -dSTACK_TOP=$(STACK_TOP) -dMEMTOP=$(MEMTOP)
 MEM_DEFINES += -dVER_MAJOR=$(VER_MAJOR) -dVER_MINOR=$(VER_MINOR)
 
@@ -69,6 +121,27 @@ endif
 MOD_DEFINES =
 ifeq ($(ENABLE_TERM),1)
     MOD_DEFINES += -dENABLE_TERM=1
+endif
+
+# SIM_STUB: simulator-only entry stub at 0000H, for testing a relocated
+# (BIOS_BASE > 0) build under cpmsim, which always starts at PC=0000H and
+# has no equivalent to a real board's hardware reset-vector redirect. Not
+# part of the ROM image - leave unset (0) for real-hardware builds.
+SIM_STUB ?= 0
+ifeq ($(SIM_STUB),1)
+    MOD_DEFINES += -dSIM_STUB=1
+endif
+
+# ENABLE_FWUPDATE: adds the 'fw' command, which uploads a new Intel HEX
+# firmware image over serial and writes it into the live EEPROM the monitor
+# is running from. Real bricking risk (single EEPROM, no fallback bank) -
+# opt-in only, off by default even in config.mk.rom.
+ENABLE_FWUPDATE ?= 0
+ifeq ($(ENABLE_FWUPDATE),1)
+    MOD_DEFINES += -dENABLE_FWUPDATE=1
+    MOD_DEFINES += -dEEPROM_SIZE=$(EEPROM_SIZE)
+    MOD_DEFINES += -dFW_STAGE_BASE=$(FW_STAGE_BASE)
+    MOD_DEFINES += -dFW_WRITER_BASE=$(FW_WRITER_BASE)
 endif
 
 ALL_DEFINES = $(MEM_DEFINES) $(HW_DEFINES) $(MOD_DEFINES)
@@ -120,6 +193,12 @@ BASIC8K_LOAD_DEFINES = $(HW_DEFINES) $(MEM_DEFINES) -dBASIC_STANDALONE=0 -dJXMON
 
 all: dirs check-tools $(SYSTEM_BIN)
 	@echo "Build complete: $(SYSTEM_BIN)"
+	@echo "  Build:      $(VER_MAJOR).$(VER_MINOR) $(BUILD_STAMP)"
+ifneq ($(BIOS_BASE),0)
+	@printf "  Checksum:   "
+	@od -An -v -tu1 $(SYSTEM_BIN) | \
+	    awk '{for(i=1;i<=NF;i++) s+=$$i} END {printf "%04X  (banner shows CK=)\n", s%65536}'
+endif
 	@echo "  Monitor at: $(BIOS_BASE)"
 	@echo "  Stack at:   $(STACK_TOP)"
 	@echo "  Memory:     $(MEM_SIZE)KB"
@@ -133,6 +212,7 @@ endif
 
 hex: dirs check-tools $(SYSTEM_HEX)
 	@echo "Build complete: $(SYSTEM_HEX)"
+	@echo "  Build:      $(VER_MAJOR).$(VER_MINOR) $(BUILD_STAMP)"
 	@echo "  Monitor at: $(BIOS_BASE)"
 
 help:
@@ -152,8 +232,12 @@ help:
 	@echo "Options:"
 	@echo "  MEM_SIZE=N       - Memory: 32, 48, 64 (default: 64)"
 	@echo "  BIOS_BASE=addr   - Monitor address (0=load at zero)"
+	@echo "  DATA_BASE=addr   - RAM data segment address (used when BIOS_BASE>0,"
+	@echo "                     e.g. for a ROM-resident build; default: 0100H)"
 	@echo "  STACK_TOP=addr   - Stack address (default: auto)"
 	@echo "  VIDEO_BASE=addr  - Video address (0=disabled)"
+	@echo "  SIM_STUB=1       - Add a cpmsim-only entry stub at 0000H when testing"
+	@echo "                     a relocated (BIOS_BASE>0) build (not for ROM images)"
 	@echo ""
 	@echo "Serial presets (override on command line):"
 	@echo "  cpmsim (default): SIO_DATA=01H SIO_STATUS=00H SIO_RX_MASK=0FFH SIO_TX_MASK=0"
@@ -169,14 +253,25 @@ check-tools:
 dirs:
 	@mkdir -p $(BUILD_DIR)
 
+# Generated build stamp. Written only when the contents actually change, so a
+# rebuild is triggered by a new commit / dirty flag / minute, not by every
+# invocation of make. Regenerated on every run because it is .PHONY-adjacent:
+# it depends on nothing, and the recipe compares before replacing.
+.PHONY: $(VERSION_INC)
+$(VERSION_INC):
+	@mkdir -p $(SRC_DIR)/lib
+	@printf ';--- generated by the Makefile - do not edit, do not commit ---\n' > $@.tmp
+	@printf 'MSG_BAN_BUILD:\n        DB      %s %s%s,0\n' "'" "$(BUILD_STAMP)" "'" >> $@.tmp
+	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv $@.tmp $@; fi
+
 # Build flat binary
 # Note: cd into BIOS_DIR so INCLUDE directives resolve relative to source
-$(SYSTEM_BIN): $(BIOS_SRCS) | dirs
+$(SYSTEM_BIN): $(BIOS_SRCS) $(CONFIG) $(VERSION_INC) | dirs
 	@echo "ASM  bios.asm -> $@"
 	@cd $(BIOS_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_BIN) $(ALL_DEFINES) -o$(CURDIR)/$@ bios.asm
 
 # Build Intel HEX (for cpmsim -x loading)
-$(SYSTEM_HEX): $(BIOS_SRCS) | dirs
+$(SYSTEM_HEX): $(BIOS_SRCS) $(CONFIG) $(VERSION_INC) | dirs
 	@echo "ASM  bios.asm -> $@"
 	@cd $(BIOS_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_HEX) $(ALL_DEFINES) -o$(CURDIR)/$@ bios.asm
 
@@ -231,6 +326,7 @@ info:
 	@echo ""
 	@echo "Memory Layout ($(MEM_SIZE)KB):"
 	@echo "  BIOS_BASE   = $(BIOS_BASE)"
+	@echo "  DATA_BASE   = $(DATA_BASE)"
 	@echo "  STACK_TOP   = $(STACK_TOP)"
 	@echo "  MEMTOP      = $(MEMTOP)"
 	@echo ""
@@ -256,7 +352,7 @@ endif
 basic: dirs check-tools $(BASIC_HEX)
 	@echo "Build complete: $(BASIC_HEX)"
 
-$(BASIC_HEX): $(BASIC_SRCS) $(BIOS_SRCS) | dirs
+$(BASIC_HEX): $(BASIC_SRCS) $(BIOS_SRCS) $(CONFIG) $(VERSION_INC) | dirs
 	@echo "ASM  basic_standalone.asm -> $@"
 	@cd $(BASIC_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_HEX) \
 	    $(BASIC_STANDALONE_DEFINES) -o$(CURDIR)/$@ basic_standalone.asm
@@ -283,7 +379,7 @@ run-basic: basic
 basic8k: dirs check-tools $(BASIC8K_HEX)
 	@echo "Build complete: $(BASIC8K_HEX)"
 
-$(BASIC8K_HEX): $(BASIC_SRCS) $(BIOS_SRCS) | dirs
+$(BASIC8K_HEX): $(BASIC_SRCS) $(BIOS_SRCS) $(CONFIG) $(VERSION_INC) | dirs
 	@echo "ASM  basic8k_standalone.asm -> $@"
 	@cd $(BASIC_DIR) && $(CURDIR)/$(Z80ASM) $(ASM_FLAGS_HEX) \
 	    $(BASIC8K_STANDALONE_DEFINES) -o$(CURDIR)/$@ basic8k_standalone.asm

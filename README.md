@@ -105,14 +105,22 @@ make run             # Same as run-basic when ENABLE_BASIC=1
 make disk            # Create boot disk image
 ```
 
-## Memory Layout (64KB)
+## Memory Layout
+
+The default build loads the monitor at address 0000H (`BIOS_BASE=0`):
 
 ```
-0000-00FF  Page Zero (JMP MONITOR at 0000H)
-0100-BFFF  Free RAM (~48KB)
-C000-C3FF  VDM-1 video framebuffer (64x16)
-F400-FFFF  Monitor (~3.5KB)
+0000-xxxx  Monitor code + data (~3.5KB)
+xxxx-FFFF  Free RAM
+C000-C3FF  VDM-1 video framebuffer (64x16), if enabled
 ```
+
+Setting `BIOS_BASE` to a nonzero address relocates the monitor and
+splits it into a ROM-resident code segment plus a separate `DATA_BASE`
+RAM segment for mutable state, so it can be burned into a real EPROM
+(e.g. on an 88-2SIOJP board) and booted without any code needing to
+live at address 0000H -- see "ROM / EPROM Builds" below and
+`DESIGN.md` section 3 for the full layout.
 
 Programs loaded at 0100H can return to the monitor via `JMP 0000H`.
 
@@ -136,6 +144,22 @@ The 8251 and 6850 have opposite RX/TX mask bit assignments. Both are auto-initia
 - Software scrolling, cursor tracking
 - All monitor output goes to both serial and video simultaneously
 
+### ROM / EPROM Builds
+
+The monitor can be relocated off address 0000H and burned into a real
+EPROM -- e.g. a 2764 (8K) on an 88-2SIOJP board -- and booted via that
+board's hardware "Jump-Start" feature, which redirects the CPU to
+`BIOS_BASE` on reset without needing any code at 0000H.
+
+```bash
+make CONFIG=config.mk.rom          # Build for a real EPROM
+make CONFIG=config.mk.sim.rom run  # Test the relocated build under cpmsim
+```
+
+See `.claude/skills/88-2SIOJP.skill.md` for EPROM socket/Jump-Start
+switch settings and `DESIGN.md` section 3 for the ROM-capable memory
+layout.
+
 ## Build System
 
 ```bash
@@ -151,19 +175,140 @@ make help       # Show build targets
 
 ### Using an Alternate Config
 
-Three configs are provided. Each contains all three serial presets as comments -- uncomment the one matching your hardware:
+Several configs are provided. Each contains all three serial presets as comments -- uncomment the one matching your hardware:
 
 | Config | Default Preset | Description |
 |--------|---------------|-------------|
 | `config.mk` | Altair 88-2SIO | Primary config (real hardware) |
 | `config.mk.sim` | cpmsim | Simulator (no UART init, no TX poll) |
 | `config.mk.sio` | Altair 88-2SIO | Alternate Altair config |
+| `config.mk.rom` | 88-2SIOJP (6850) | ROM-capable build, monitor relocated off 0000H |
+| `config.mk.sim.rom` | cpmsim | Simulator-testable variant of `config.mk.rom` |
 
 Override with `CONFIG=`:
 
 ```bash
 make run CONFIG=config.mk.sim
 ```
+
+The build depends on the config file itself, so changing a config value
+(and nothing else) still forces a reassembly. Switching `CONFIG=` between
+builds without `make clean` is safe.
+
+## Testing
+
+### cpmsim (Expect suite)
+
+```bash
+make test                       # Build matrix + functional tests
+expect -f tests/test-boot.exp   # Single test (after: make hex CONFIG=config.mk.sim)
+```
+
+The suite builds three configs x three targets, then drives cpmsim through
+`tests/harness.exp`. See `tests/run-tests.sh`.
+
+### BitsBy8 (virtual S-100 machine)
+
+[BitsBy8](https://github.com/joezilla/fdcplus-web) serves disk images to a
+real Altair over serial and boots fully virtual S-100 machines in the
+browser. It is the closest thing to the real board short of burning an
+EPROM: the monitor runs against emulated cards (6850 ACIA, VDM-1, EPROM
+socket) with the same port and memory decoding as the hardware, so it
+catches port/base-address mistakes that cpmsim cannot.
+
+A machine profile assembles the cards. The ROM build is exercised by
+**JX Monitor ROM Test - 88-2SIOJP**:
+
+| Card | Config |
+|------|--------|
+| `cpu` (`i8080-cpu`) | resetVector `E000H` -- stands in for Jump-Start |
+| `ramLow` (`ram-card`) | `0000H`, 51K (covers `DATA_BASE` and the stack) |
+| `video` (`vdm-1-video`) | base `CC00H`, dstatPort `C8H` |
+| `ramMid` (`ram-card`) | `D000H`, 4K |
+| `eeprom` (`eprom-card`) | base `E000H`, 8K (the 2764/28C64 window) |
+| `sio` (`mits-88-2sio`) | basePort `10H` -- status `10H`/`12H`, data `11H`/`13H` |
+
+Card and profile settings must agree with the config the ROM was built
+from: `BIOS_BASE`/`EEPROM_SIZE` with the EPROM card, `VIDEO_BASE`/
+`VIDEO_CTRL` with the VDM-1 card, and `SIO_STATUS`/`SIO_DATA` with the
+2SIO card's `basePort` (the 6850 puts control/status at the even address
+and data at the odd one, so `SIO_STATUS` = basePort and `SIO_DATA` =
+basePort+1).
+
+### Identifying a build
+
+Every build is stamped, because a version number alone cannot answer the
+question that actually comes up when burning an EPROM or uploading to a
+virtual machine: *are these the bytes I just built?*
+
+```
+JX/8080 Version 0.9 ged6170c+ 260821.0154
+SIO 11/10 RX=01 TX=02 6850  CK=4463
+```
+
+| Field | Meaning |
+|-------|---------|
+| `ged6170c` | Commit the build came from (`git rev-parse --short=7`) |
+| `+` | Tracked files were dirty at build time (untracked files don't count) |
+| `260821.0154` | UTC build time, `YYMMDD.HHMM` |
+| `CK=4463` | 16-bit sum of `BIOS_BASE..CODE_END-1`, computed by the monitor over its own image at boot |
+
+`make` prints the same two lines, so comparing them is the whole check:
+
+```
+$ make CONFIG=config.mk.rom
+  Build:      0.9 ged6170c+ 260821.0154
+  Checksum:   4463  (banner shows CK=)
+```
+
+The commit tells you *which* build; the checksum tells you the running image
+really is that build. A stale `build/jx.bin`, a burn into the wrong profile
+version, or a partial EEPROM write all leave the commit id looking right and
+change `CK`.
+
+`CK` appears only on ROM builds (`BIOS_BASE > 0`). A load-at-zero image has
+mutable variables interleaved with its code, so a self-checksum would drift as
+the monitor runs.
+
+The stamp comes from `src/lib/version.inc`, regenerated by the Makefile on
+every build and gitignored. It is rewritten only when its contents change, so
+an unchanged commit within the same minute does not force a reassembly.
+
+### Test loop
+
+BitsBy8 exposes an MCP server (stdio or HTTP), so the whole cycle runs
+from an AI assistant or a script without touching the web UI:
+
+1. `make CONFIG=config.mk.rom` -- build `build/jx.bin`
+2. `burn_eprom` -- load the image into the profile's `eeprom` card with
+   `addressing: "base"`. This writes a **new profile version**; earlier
+   versions stay resolvable, so a bad image is never destructive.
+3. `create_transient_instance` with the new `profileRef` -- creates and
+   boots a memory-only instance
+4. `read_instance_console` / `write_instance_console` -- check the banner
+   and drive the monitor (send a real `CR`, not the two characters `\r`)
+5. `destroy_machine_instance` -- transients leave no residue
+
+Useful companions: `list_machine_profiles`, `get_machine_profile`,
+`validate_machine_profile` (reports port/IRQ/memory collisions and the
+resolved memory map before you boot), `get_card_detail` (a card's port
+footprint and programming notes), and `list_machine_instances`.
+
+Everything above is also on the REST API (`/api/profiles/{id}/cards/{cardId}/burn`,
+`/api/instances/{id}/console`, ...) with `Authorization: Bearer <api-key>`;
+OpenAPI docs at `/api/docs`.
+
+A healthy boot on the profile above:
+
+```
+JX/8080 Version 0.9
+SIO 11/10 RX=01 TX=02 6850
+Video: VDM-1 64x16 at CC00
+  E000-F3EE  Monitor
+```
+
+The `SIO` line echoes the assembled data/status ports -- the fastest way to
+tell whether the running image was built from the config you think it was.
 
 ## Configuration (config.mk)
 
@@ -187,7 +332,8 @@ Secondary serial port (`SIO2_*`) uses the same options with the `SIO2_` prefix.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `MEM_SIZE` | `48` | RAM size in KB (32, 48, or 64) |
-| `BIOS_BASE` | `0` | Monitor ORG address (0 = flat binary at address 0) |
+| `BIOS_BASE` | `0` | Monitor ORG address (0 = flat binary at address 0; >0 = ROM-capable, relocated) |
+| `DATA_BASE` | `0100H` | RAM data segment address (used only when BIOS_BASE > 0) |
 | `STACK_TOP` | *(auto)* | Stack address (auto = MEMTOP; set explicitly if MEM_SIZE doesn't match hardware) |
 | `VIDEO_BASE` | `0CC00H` | VDM-1 base address (0 = disabled) |
 | `ENABLE_BASIC` | `0` | Include Altair BASIC (0 or 1) |
@@ -203,6 +349,8 @@ jx/
 ├── config.mk           Hardware config (Altair 88-2SIO default)
 ├── config.mk.sim       Hardware config (cpmsim simulator)
 ├── config.mk.sio       Hardware config (Altair 88-2SIO alternate)
+├── config.mk.rom       Hardware config (ROM-capable, 88-2SIOJP)
+├── config.mk.sim.rom   Hardware config (simulator test of config.mk.rom)
 ├── src/
 │   ├── bios/
 │   │   ├── bios.asm    System entry point (includes everything)
@@ -218,6 +366,10 @@ jx/
 │   └── monitor.asm     Monitor command processor
 ├── scripts/
 │   └── run-boot.sh     Build and run helper
+├── tests/
+│   ├── run-tests.sh    Test runner entry point
+│   ├── harness.exp     Shared Expect framework
+│   └── test-*.exp      Functional tests (boot, dump, write, io, basic)
 ├── docs/
 │   ├── BUILD_SYSTEM.md Build system reference
 │   ├── TOOLCHAIN.md    Assembler and simulator reference
@@ -233,6 +385,8 @@ jx/
 - **[Toolchain](docs/TOOLCHAIN.md)** -- Assembler syntax and simulator usage
 - **[z80asm Bugs](docs/Z80ASM_BUGS.md)** -- Known assembler quirks
 - **[Design](DESIGN.md)** -- Architecture and memory layout
+- **[BitsBy8](https://github.com/joezilla/fdcplus-web)** -- Disk server and
+  virtual S-100 workbench used to boot-test ROM builds (see [Testing](#testing))
 
 ## Toolchain
 

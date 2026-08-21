@@ -54,36 +54,83 @@ JX uses polled I/O. Interrupts are disabled at boot (`DI`).
 
 ## 3. Memory Layout
 
-### 3.1 Overview (64KB)
+The monitor's placement is controlled by `BIOS_BASE`, and comes in two
+shapes: **load-at-zero** (`BIOS_BASE=0`, the current default in
+`config.mk`) and **ROM-capable** (`BIOS_BASE` > 0), which relocates the
+monitor so it can be burned into a real EPROM.
+
+### 3.1 Load-at-zero (BIOS_BASE=0)
 
 ```
-0000-00FF  Page Zero
-             0000: JMP WBOOT (return to monitor)
-0100-BFFF  Free RAM (~48KB)
+0000-xxxx  Monitor code + data (~3.5KB)
+xxxx-FFFF  Free RAM
              Available for user programs via 'go' command
-C000-C3FF  VDM-1 video framebuffer (if enabled)
-             64 columns x 16 rows = 1024 bytes
-F400-FFFF  Monitor code + data (~3.5KB)
-             Includes: boot, serial, video, print, string, monitor
+[C000-C3FF VDM-1 video framebuffer, if enabled]
 ```
 
-### 3.2 Memory Configurations
+This is the simplest layout: the whole image, including mutable
+variables, is one RAM-resident blob starting at address 0. There is no
+ROM/RAM split.
 
-| Total RAM | Monitor Base | Free RAM | Video |
-|-----------|-------------|----------|-------|
-| 32KB | 7400H | 0100-73FF | N/A |
-| 48KB | B400H | 0100-B3FF | N/A |
-| 64KB | F400H | 0100-BFFF | C000-C3FF |
+### 3.2 ROM-capable (BIOS_BASE > 0)
+
+```
+0000-00FF        Page Zero
+                   0000: JMP WBOOT (return to monitor - written at boot)
+0100-DATA_END-1  Mutable data segment (RAM: cursor position, command
+                   buffer, detected memory size, etc.)
+DATA_END-xxxx    Free RAM (below the monitor)
+BIOS_BASE-       Monitor code (~3.5KB) - may be ROM-resident
+  CODE_END-1
+CODE_END-xxxx    Free RAM (above the monitor, if any)
+[VIDEO_BASE-     VDM-1 video framebuffer, if enabled
+  +VIDEO_SIZE-1]
+```
+
+Because the code above `BIOS_BASE` may live in read-only memory, all
+mutable state is kept out of it and placed in a separate RAM segment
+at `DATA_BASE` (default `0100H`) instead. `BIOS_BASE` can sit anywhere
+in the address space that the target hardware allows - not only at
+the top of RAM - so free RAM can exist both below and above the
+monitor's code window. `MEMPROBE`/`PRMMAP` (in `bios.asm`) and the `m`
+command (in `monitor.asm`) account for both windows.
+
+To actually run this layout on hardware, something must redirect
+execution to `BIOS_BASE` on reset without relying on code at 0000H -
+either a board feature like the 88-2SIOJP's "Jump-Start" (see
+`.claude/skills/88-2SIOJP.skill.md`), which forces a `JMP BIOS_BASE`
+onto the bus after reset, or (for testing under `cpmsim`, which always
+starts at `PC=0000H`) the `SIM_STUB` build option, which assembles a
+`JMP BOOT` at address 0000H. `SIM_STUB` is simulator-only and is not
+part of a real ROM image.
 
 ### 3.3 Page Zero (0000-00FF)
 
-Only one entry point is used:
+When `BIOS_BASE > 0`, page zero holds one entry point, written by
+`INIT_PAGE0` at boot (not present in the ROM image itself):
 
 | Address | Contents | Purpose |
 |---------|----------|---------|
 | 0000H | JMP WBOOT | Warm boot -- returns to monitor prompt |
 
 Programs executed via the `go` command can return to the monitor with `JMP 0000H`.
+
+### 3.4 BIOS Jump Table (BIOS_BASE > 0 only)
+
+External programs and hardware reset-vector redirects use a fixed
+jump table at the start of the monitor's code:
+
+| Offset | Target | Purpose |
+|--------|--------|---------|
+| BIOS_BASE+0  | BOOT    | Cold-boot / hardware reset entry |
+| BIOS_BASE+3  | WBOOT   | Warm boot |
+| BIOS_BASE+6  | CONST   | Console status |
+| BIOS_BASE+9  | GETCHAR | Blocking read |
+| BIOS_BASE+12 | PUTCHAR | Dual (serial+video) output |
+
+`BIOS_BASE+0` must always be a full cold-boot entry point, since a
+hardware reset-vector redirect (like Jump-Start) lands there directly
+and expects serial/video hardware to be initialized.
 
 ---
 
@@ -106,13 +153,19 @@ bios.asm          Boot, PUTCHAR, GETCHAR, MEMPROBE
 ### 4.2 Boot Sequence
 
 1. `DI` -- disable interrupts
-2. Set stack pointer to BIOS_BASE (grows downward into free RAM)
+2. Set stack pointer to STACK_TOP (grows downward into free RAM)
 3. Print banner via serial only (video not yet initialized)
-4. Detect memory -- probe from 32KB upward in 256-byte pages
+4. Detect memory -- probe free RAM in 256-byte pages, skipping the
+   monitor's own ROM/code window when BIOS_BASE > 0
 5. Initialize VDM-1 video (clear framebuffer, reset cursor)
-6. Set up Page Zero: `JMP WBOOT` at 0000H
+6. Set up Page Zero: `JMP WBOOT` at 0000H (BIOS_BASE > 0 only)
 7. Print memory map
 8. Enter monitor command loop
+
+When `BIOS_BASE > 0`, this sequence is entered via `BOOT`, which is
+reachable both from `JMP BOOT` at `BIOS_BASE+0` (the entry a hardware
+reset-vector redirect lands on) and, for simulator testing only, from
+the `SIM_STUB`-gated `JMP BOOT` at address 0000H.
 
 ### 4.3 Dual Output
 
