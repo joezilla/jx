@@ -1,0 +1,125 @@
+# JX Monitor - Toolchain Configuration
+# ======================================
+# ROM-capable build: monitor relocated off address 0000H so it can be
+# burned into a real EPROM (e.g. a 2764) on an 88-2SIOJP board and
+# booted via that board's hardware "Jump-Start" feature, which forces
+# a JMP to BIOS_BASE on reset instead of relying on code at 0000H.
+#
+# The 88-2SIOJP's EPROM socket (SW4) only accepts 8K-aligned base
+# addresses for a 2764: 0000H, 2000H, 4000H, 6000H, 8000H, A000H,
+# C000H, E000H. BIOS_BASE below is set to 0A000H as a representative
+# choice, clear of both Page Zero and VIDEO_BASE. Set SW1 (Jump-Start
+# address) and SW4 (EPROM address) to match whichever slot you pick.
+# See .claude/skills/88-2SIOJP.skill.md for the full switch settings.
+
+# ----------------------------------------------
+# z80pack Installation Path
+# ----------------------------------------------
+Z80PACK_DIR = ../z80pack
+
+# ----------------------------------------------
+# Assembler Configuration
+# ----------------------------------------------
+Z80ASM = $(Z80PACK_DIR)/z80asm/z80asm
+
+# Assembler flags for 8080 mode
+ASM_FLAGS_COMMON = -8 -e32 -l -T -sn -p0
+ASM_FLAGS_BIN = $(ASM_FLAGS_COMMON) -fb
+ASM_FLAGS_HEX = $(ASM_FLAGS_COMMON) -fh
+
+# ----------------------------------------------
+# Simulator Configuration
+# ----------------------------------------------
+SIMULATOR = $(Z80PACK_DIR)/cpmsim/cpmsim
+SIM_FLAGS = -8 -m 00
+
+# ----------------------------------------------
+# Serial Configuration
+# ----------------------------------------------
+# The 88-2SIOJP is built around a Motorola 68A50/68B50 ACIA - the
+# same chip and register layout as the MITS Altair 88-2SIO, NOT the
+# IMSAI SIO2's 8251 USART. Use the 6850 profile (see
+# .claude/skills/MITS-88-2SIO.skill.md).
+#   Status: bit 0 = RX ready (RDRF), bit 1 = TX ready (TDRE)
+#   Requires 6850 master reset + mode init at boot.
+#
+SIO_NAME    = 88-2SIOJP (6850 ACIA)
+SIO_DATA    = 07DH
+SIO_STATUS  = 07CH
+SIO_RX_MASK = 01H
+SIO_TX_MASK = 02H
+SIO_8251   = 0
+SIO_6850   = 1
+
+# SIO Channel B (88-2SIOJP's second port)
+SIO2_DATA    = 07FH
+SIO2_STATUS  = 07EH
+SIO2_RX_MASK = 01H
+SIO2_TX_MASK = 02H
+
+# ----------------------------------------------
+# Optional Modules
+# ----------------------------------------------
+ENABLE_TERM = 1
+
+# BASIC: 0=none, 1=4K BASIC (Palo Alto/Altair), 2=8K BASIC (IMSAI)
+ENABLE_BASIC = 0
+
+# Firmware update ('fw' command): uploads a new Intel HEX image over serial
+# and writes it into the live EEPROM. Real bricking risk (single EEPROM, no
+# fallback bank) - only enable if you actually intend to field-upgrade this
+# way. See .claude/skills/88-2SIOJP.skill.md. Requires a writable EEPROM
+# (e.g. 28C64B) in the socket, not a true (non-writable) EPROM.
+ENABLE_FWUPDATE = 1
+
+# ----------------------------------------------
+# Memory Configuration
+# ----------------------------------------------
+MEM_SIZE = 64
+
+# BIOS_BASE: monitor's ROM window. Must be one of the 88-2SIOJP's
+# 8K-aligned EPROM slots: 0000H, 2000H, 4000H, 6000H, 8000H, A000H,
+# C000H, E000H. Chosen here to leave RAM both below and above the
+# ROM window (below VIDEO_BASE).
+BIOS_BASE = 0E000H
+
+# DATA_BASE: RAM address for the monitor's mutable state (cursor
+# position, command buffer, etc.) - kept out of the ROM image.
+DATA_BASE = 0100H
+
+# Firmware-update RAM layout (only used when ENABLE_FWUPDATE=1 above).
+# EEPROM_SIZE must match the EEPROM socket window (8K for a 2764/28C64
+# slot). FW_STAGE_BASE/FW_WRITER_BASE just need to sit in free RAM clear
+# of DATA_BASE's variables and BIOS_BASE's code/stack - the defaults
+# below (0100H-015AH data, 2000H-3FFFH staging, 4000H+ writer, A000H+
+# code) already satisfy that for this config.
+EEPROM_SIZE = 02000H
+FW_STAGE_BASE = 02000H
+FW_WRITER_BASE = 04000H
+
+# STACK_TOP: left blank to auto-compute as BIOS_BASE (stack grows
+# downward into the free RAM below the ROM window).
+STACK_TOP = 0CC00H
+# ----------------------------------------------
+# Video Configuration
+# ----------------------------------------------
+# Processor Technology VDM-1
+# 64 columns x 16 rows at C000H
+# Set VIDEO_BASE=0 to disable video support
+VIDEO_BASE = 0CC00H
+VIDEO_CTRL = 0C8H
+VIDEO_COLS = 64
+VIDEO_ROWS = 16
+
+# ----------------------------------------------
+# Build Directories
+# ----------------------------------------------
+SRC_DIR = src
+BUILD_DIR = build
+BIOS_DIR = $(SRC_DIR)/bios
+
+# ----------------------------------------------
+# Output Files
+# ----------------------------------------------
+SYSTEM_BIN = $(BUILD_DIR)/jx.bin
+SYSTEM_HEX = $(BUILD_DIR)/jx.hex

@@ -52,7 +52,7 @@ src/bios/bios.asm        → Boot, PUTCHAR, GETCHAR, MEMPROBE
 
 **Dual output**: PUTCHAR sends to both serial (CONOUT) and video (V_PUTCH). All print routines go through PUTCHAR, so output appears on both displays automatically.
 
-**Memory layout** (64KB, load-at-zero): Monitor at 0000H, free RAM above, VDM-1 framebuffer at CC00H, stack below framebuffer.
+**Memory layout** depends on `BIOS_BASE`. Default (`BIOS_BASE=0`, load-at-zero, 64KB): Monitor at 0000H, free RAM above, VDM-1 framebuffer at CC00H, stack below framebuffer. When `BIOS_BASE > 0` (ROM-capable — e.g. burning the monitor into a real EPROM), code is relocated to `BIOS_BASE` and all mutable state moves to a separate RAM segment at `DATA_BASE` so the code image can be read-only; free RAM can then exist both below and above the monitor. See `DESIGN.md` section 3 for both layouts.
 
 ## Hardware Configuration
 
@@ -60,8 +60,10 @@ All hardware settings live in `config.mk` (active config) with presets in `confi
 - `config.mk` — primary (currently IMSAI SIO-2 with VDM-1)
 - `config.mk.sim` — cpmsim simulator (serial-only, no video)
 - `config.mk.sio` — Altair 88-2SIO
+- `config.mk.rom` — ROM-capable build (monitor relocated off 0000H, e.g. for an EPROM on an 88-2SIOJP board)
+- `config.mk.sim.rom` — cpmsim-testable variant of `config.mk.rom` (adds `SIM_STUB`, since cpmsim always starts at PC=0000H)
 
-Key variables: `MEM_SIZE`, `BIOS_BASE`, `STACK_TOP`, `VIDEO_BASE`, `SIO_DATA/STATUS/RX_MASK/TX_MASK`, `ENABLE_BASIC` (0/1/2), `ENABLE_TERM` (0/1). These are passed to the assembler as `-d` defines.
+Key variables: `MEM_SIZE`, `BIOS_BASE`, `DATA_BASE`, `STACK_TOP`, `VIDEO_BASE`, `SIO_DATA/STATUS/RX_MASK/TX_MASK`, `ENABLE_BASIC` (0/1/2), `ENABLE_TERM` (0/1), `SIM_STUB` (0/1). These are passed to the assembler as `-d` defines.
 
 ## Assembly Conventions
 
@@ -97,8 +99,9 @@ Detailed hardware programming references live in `.claude/skills/`. Consult the 
 - `VDM-1.skill.md` — Processor Technology VDM-1: memory-mapped video at CC00H, hardware scroll, cursor, escape sequences
 - `88-DCDD.skill.md` — MITS 88-DCDD floppy controller: disk I/O ports 08-0Ah, sector format, timing-critical read loops
 - `MITS.Bootloader.skill.md` — Altair disk boot loader: Intel HEX format, 8080 instruction set, relocation, boot sequence
+- `88-2SIOJP.skill.md` — 88-2SIOJP dual serial + EPROM board: EPROM socket address alignment, "Jump-Start" hardware reset-vector redirect, required for `config.mk.rom` (ROM-capable, `BIOS_BASE > 0`) builds
 
-**When to consult**: Modifying `serial.asm`, `video.asm`, adding disk support, writing bootstrap code, or porting between hardware configurations. The status bit layouts and initialization sequences differ significantly between the IMSAI 8251, Altair MC6850, and IMSAI MIO TR1602 UARTs.
+**When to consult**: Modifying `serial.asm`, `video.asm`, adding disk support, writing bootstrap code, porting between hardware configurations, or working on a `BIOS_BASE > 0` (ROM-capable) build. The status bit layouts and initialization sequences differ significantly between the IMSAI 8251, Altair MC6850, and IMSAI MIO TR1602 UARTs.
 
 ## Key Documentation
 

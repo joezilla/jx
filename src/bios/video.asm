@@ -41,8 +41,17 @@ LAST_ROW_ADDR   EQU     VIDEO_BASE + (VIDEO_COLS * (VIDEO_ROWS - 1))
 ;========================================================
 ; Video state variables
 ;========================================================
+; This file is INCLUDEd both by bios.asm (which, when
+; BIOS_BASE > 0, relocates all mutable state to a separate
+; RAM data segment - see bios.asm's "Mutable Data Segment")
+; and directly by the standalone BASIC builds (which have no
+; such split). Callers that declare these variables
+; themselves elsewhere define VIDEO_VARS_EXTERNAL first.
+;========================================================
+        IFNDEF VIDEO_VARS_EXTERNAL
 V_CURROW:       DB      0       ; Current cursor row (0-15)
 V_CURCOL:       DB      0       ; Current cursor column (0-63)
+        ENDIF
 
 ;========================================================
 ; V_INIT - Initialize video display

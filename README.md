@@ -105,14 +105,22 @@ make run             # Same as run-basic when ENABLE_BASIC=1
 make disk            # Create boot disk image
 ```
 
-## Memory Layout (64KB)
+## Memory Layout
+
+The default build loads the monitor at address 0000H (`BIOS_BASE=0`):
 
 ```
-0000-00FF  Page Zero (JMP MONITOR at 0000H)
-0100-BFFF  Free RAM (~48KB)
-C000-C3FF  VDM-1 video framebuffer (64x16)
-F400-FFFF  Monitor (~3.5KB)
+0000-xxxx  Monitor code + data (~3.5KB)
+xxxx-FFFF  Free RAM
+C000-C3FF  VDM-1 video framebuffer (64x16), if enabled
 ```
+
+Setting `BIOS_BASE` to a nonzero address relocates the monitor and
+splits it into a ROM-resident code segment plus a separate `DATA_BASE`
+RAM segment for mutable state, so it can be burned into a real EPROM
+(e.g. on an 88-2SIOJP board) and booted without any code needing to
+live at address 0000H -- see "ROM / EPROM Builds" below and
+`DESIGN.md` section 3 for the full layout.
 
 Programs loaded at 0100H can return to the monitor via `JMP 0000H`.
 
@@ -136,6 +144,22 @@ The 8251 and 6850 have opposite RX/TX mask bit assignments. Both are auto-initia
 - Software scrolling, cursor tracking
 - All monitor output goes to both serial and video simultaneously
 
+### ROM / EPROM Builds
+
+The monitor can be relocated off address 0000H and burned into a real
+EPROM -- e.g. a 2764 (8K) on an 88-2SIOJP board -- and booted via that
+board's hardware "Jump-Start" feature, which redirects the CPU to
+`BIOS_BASE` on reset without needing any code at 0000H.
+
+```bash
+make CONFIG=config.mk.rom          # Build for a real EPROM
+make CONFIG=config.mk.sim.rom run  # Test the relocated build under cpmsim
+```
+
+See `.claude/skills/88-2SIOJP.skill.md` for EPROM socket/Jump-Start
+switch settings and `DESIGN.md` section 3 for the ROM-capable memory
+layout.
+
 ## Build System
 
 ```bash
@@ -151,13 +175,15 @@ make help       # Show build targets
 
 ### Using an Alternate Config
 
-Three configs are provided. Each contains all three serial presets as comments -- uncomment the one matching your hardware:
+Several configs are provided. Each contains all three serial presets as comments -- uncomment the one matching your hardware:
 
 | Config | Default Preset | Description |
 |--------|---------------|-------------|
 | `config.mk` | Altair 88-2SIO | Primary config (real hardware) |
 | `config.mk.sim` | cpmsim | Simulator (no UART init, no TX poll) |
 | `config.mk.sio` | Altair 88-2SIO | Alternate Altair config |
+| `config.mk.rom` | 88-2SIOJP (6850) | ROM-capable build, monitor relocated off 0000H |
+| `config.mk.sim.rom` | cpmsim | Simulator-testable variant of `config.mk.rom` |
 
 Override with `CONFIG=`:
 
@@ -187,7 +213,8 @@ Secondary serial port (`SIO2_*`) uses the same options with the `SIO2_` prefix.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `MEM_SIZE` | `48` | RAM size in KB (32, 48, or 64) |
-| `BIOS_BASE` | `0` | Monitor ORG address (0 = flat binary at address 0) |
+| `BIOS_BASE` | `0` | Monitor ORG address (0 = flat binary at address 0; >0 = ROM-capable, relocated) |
+| `DATA_BASE` | `0100H` | RAM data segment address (used only when BIOS_BASE > 0) |
 | `STACK_TOP` | *(auto)* | Stack address (auto = MEMTOP; set explicitly if MEM_SIZE doesn't match hardware) |
 | `VIDEO_BASE` | `0CC00H` | VDM-1 base address (0 = disabled) |
 | `ENABLE_BASIC` | `0` | Include Altair BASIC (0 or 1) |
@@ -203,6 +230,8 @@ jx/
 ├── config.mk           Hardware config (Altair 88-2SIO default)
 ├── config.mk.sim       Hardware config (cpmsim simulator)
 ├── config.mk.sio       Hardware config (Altair 88-2SIO alternate)
+├── config.mk.rom       Hardware config (ROM-capable, 88-2SIOJP)
+├── config.mk.sim.rom   Hardware config (simulator test of config.mk.rom)
 ├── src/
 │   ├── bios/
 │   │   ├── bios.asm    System entry point (includes everything)

@@ -11,7 +11,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-configs=(config.mk.sim config.mk.mon config.mk.sio)
+configs=(config.mk.sim config.mk.mon config.mk.sio config.mk.rom config.mk.sim.rom)
 targets=(hex basic basic8k)
 output_files=("build/jx.hex" "build/basic.hex" "build/basic8k.hex")
 

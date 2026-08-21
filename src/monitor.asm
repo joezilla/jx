@@ -16,6 +16,7 @@
 ;   mem / m            Show memory layout
 ;   cls                Clear screen
 ;   term / e           Terminal (SIO2 pass-through) [optional]
+;   fw <port>          Firmware update via serial [optional]
 ;
 ; This module is INCLUDEd by bios.asm.
 ;========================================================
@@ -158,6 +159,13 @@ MDISP:
         JZ      DO_TERM
         ENDIF
 
+        IF ENABLE_FWUPDATE
+        LHLD    CMDPTR
+        LXI     D,CMD_FW
+        CALL    STRCMP
+        JZ      DO_FW
+        ENDIF
+
         ; Unknown command
         LXI     H,MSG_UNK
         CALL    PRINTS
@@ -194,6 +202,10 @@ CMD_TERM:       DB      'TERM',0
 CMD_E:          DB      'E',0
         ENDIF
 
+        IF ENABLE_FWUPDATE
+CMD_FW:         DB      'FW',0
+        ENDIF
+
 ;========================================================
 ; DO_HELP
 ;========================================================
@@ -202,6 +214,10 @@ DO_HELP:
         CALL    PRINTS
         IF ENABLE_TERM
         LXI     H,MSG_HTRM
+        CALL    PRINTS
+        ENDIF
+        IF ENABLE_FWUPDATE
+        LXI     H,MSG_HFW
         CALL    PRINTS
         ENDIF
         LXI     H,MSG_HFTR
@@ -342,8 +358,9 @@ DO_TEST:
 
 TST_DEF:
         IF BIOS_BASE
-        ; Traditional: test free RAM below monitor
-        LXI     H,0100H
+        ; ROM-capable layout: test free RAM below monitor
+        ; (after the mutable data segment)
+        LXI     H,DATA_END
         SHLD    TST_SADR
         LXI     H,BIOS_BASE-1
         SHLD    TST_EADR
@@ -516,6 +533,20 @@ DO_MEM:
         LXI     H,MSG_MTOT
         CALL    PRINTS
         LHLD    DETECTED_MEM
+        IF BIOS_BASE
+        ; DETECTED_MEM = free-page count (0-256). KB = count/4.
+        MOV     A,H
+        ORA     A
+        JZ      MEM_KB
+        MVI     A,64            ; H<>0 means count=256 -> 64KB
+        JMP     MEM_KP
+MEM_KB:
+        MOV     A,L
+        RRC
+        RRC
+        ANI     03FH
+        ELSE
+        ; DETECTED_MEM = top-of-RAM address. KB = high byte/4.
         MOV     A,H
         ORA     A
         JNZ     MEM_KB
@@ -525,20 +556,35 @@ MEM_KB:
         RRC
         RRC
         ANI     03FH
+        ENDIF
 MEM_KP:
         CALL    PRDEC8
         LXI     H,MSG_MKB
         CALL    PRINTS
 
-        ; Free RAM range (computed from layout)
+        ; Free RAM range (computed from layout). The first span
+        ; ends at whichever region comes next in the address
+        ; space - the framebuffer when it sits below the ROM
+        ; window (config.mk.rom: video CC00, ROM E000), else the
+        ; ROM window itself. Running it all the way to
+        ; BIOS_BASE-1 unconditionally would wrongly report the
+        ; framebuffer as free RAM.
         LXI     H,MSG_MFRL
         CALL    PRINTS
         IF BIOS_BASE
-        LXI     H,0100H
+        LXI     H,DATA_END
         CALL    PRHEX16
         MVI     A,'-'
         CALL    PUTCHAR
+        IF VIDEO_BASE
+        IF VIDEO_BASE < BIOS_BASE
+        LXI     H,VIDEO_BASE-1
+        ELSE
         LXI     H,BIOS_BASE-1
+        ENDIF
+        ELSE
+        LXI     H,BIOS_BASE-1
+        ENDIF
         CALL    PRHEX16
         ELSE
         LXI     H,CODE_END
@@ -574,6 +620,71 @@ MEM_KP:
         LXI     H,CODE_END-1
         CALL    PRHEX16
         CALL    PRCRLF
+
+        ; Any further free-RAM spans - only relevant for the
+        ; ROM-capable layout, where the monitor need not sit at
+        ; the top of RAM. Spans start at the end of the region
+        ; below them, never at CODE_END: the slack between
+        ; CODE_END and the end of the ROM window is still ROM
+        ; (see PRMMAP).
+        IF BIOS_BASE
+        IF VIDEO_BASE
+        IF VIDEO_BASE < BIOS_BASE
+        IF VID_END < BIOS_BASE
+        ; framebuffer below the ROM: report the gap between them
+        LXI     H,MSG_MFRL
+        CALL    PRINTS
+        LXI     H,VID_END
+        CALL    PRHEX16
+        MVI     A,'-'
+        CALL    PUTCHAR
+        LXI     H,BIOS_BASE-1
+        CALL    PRHEX16
+        LXI     H,MSG_MFRR
+        CALL    PRINTS
+        ENDIF
+        IF ROM_END
+        LXI     H,MSG_MFRL
+        CALL    PRINTS
+        LXI     H,ROM_END
+        CALL    PRHEX16
+        MVI     A,'-'
+        CALL    PUTCHAR
+        LXI     H,MEMTOP-1
+        CALL    PRHEX16
+        LXI     H,MSG_MFRR
+        CALL    PRINTS
+        ENDIF
+        ELSE
+        ; framebuffer above the ROM window
+        IF ROM_END
+        LXI     H,MSG_MFRL
+        CALL    PRINTS
+        LXI     H,ROM_END
+        CALL    PRHEX16
+        MVI     A,'-'
+        CALL    PUTCHAR
+        LXI     H,VIDEO_BASE-1
+        CALL    PRHEX16
+        LXI     H,MSG_MFRR
+        CALL    PRINTS
+        ENDIF
+        ENDIF
+        ELSE
+        IF ROM_END
+        LXI     H,MSG_MFRL
+        CALL    PRINTS
+        LXI     H,ROM_END
+        CALL    PRHEX16
+        MVI     A,'-'
+        CALL    PUTCHAR
+        LXI     H,MEMTOP-1
+        CALL    PRHEX16
+        LXI     H,MSG_MFRR
+        CALL    PRINTS
+        ENDIF
+        ENDIF
+        ENDIF
 
         JMP     MONITOR
 
@@ -1134,21 +1245,11 @@ FINDSP:
         JMP     FINDSP
 
 ;========================================================
-; Monitor variables
+; Monitor variables (CMDPTR, ARGPTR, DMP_ADDR, DMP_END,
+; TST_SADR/EADR/CADR/ECNT, WRT_ADDR, LD_PORT/BCNT/ECNT,
+; CMDBUF) are declared in bios.asm's mutable data segment,
+; not here - see bios.asm's "Mutable Data Segment" section.
 ;========================================================
-CMDPTR:         DW      0       ; Pointer to command string
-ARGPTR:         DW      0       ; Pointer to arguments
-DMP_ADDR:       DW      0       ; Dump current address
-DMP_END:        DW      0       ; Dump end address
-TST_SADR:       DW      0       ; Test start address
-TST_EADR:       DW      0       ; Test end address
-TST_CADR:       DW      0       ; Test current address
-TST_ECNT:       DW      0       ; Test error count
-WRT_ADDR:       DW      0       ; Write current address
-LD_PORT:        DB      0       ; 0=port1 (console), 1=port2 (aux)
-LD_BCNT:        DW      0       ; Total bytes loaded
-LD_ECNT:        DW      0       ; Checksum error count
-CMDBUF:         DS      CMDBUF_SIZE     ; Command input buffer
 
 ;========================================================
 ; Monitor messages
@@ -1174,6 +1275,11 @@ MSG_HTRM:
         DB      '  term / e            Terminal (SIO2 pass-through)',CR,LF,0
         ENDIF
 
+        IF ENABLE_FWUPDATE
+MSG_HFW:
+        DB      '  fw <port>           Firmware update (1=con, 2=aux)',CR,LF,0
+        ENDIF
+
 MSG_HFTR:
         DB      CR,LF
         DB      'Addresses and bytes are hex.',CR,LF,0
@@ -1188,6 +1294,18 @@ MSG_OERR:       DB      'Usage: out <port> <byte>',CR,LF,0
 MSG_LUSE:       DB      'Usage: l <port> (1=con, 2=aux)',CR,LF,0
 MSG_LRDY:       DB      'Send Intel HEX data...',CR,LF,0
 MSG_LLDD:       DB      'Loaded ',0
+
+        IF ENABLE_FWUPDATE
+MSG_FWUSE:      DB      'Usage: fw <port> (1=con, 2=aux)',CR,LF,0
+MSG_FWWARN:     DB      'Firmware Update - this can overwrite the running EEPROM.',CR,LF,0
+MSG_FWERR:      DB      'Upload rejected (bad checksum or out-of-range address).',CR,LF,0
+MSG_FWGAP:      DB      'Image does not start at BIOS_BASE - rejected.',CR,LF,0
+MSG_FWSUM:      DB      'Range: ',0
+MSG_FWCKS:      DB      'Checksum: ',0
+MSG_FWEPW:      DB      'Warning: first byte is not a JMP opcode - may not be a valid image.',CR,LF,0
+MSG_FWCONF:     DB      'Write to EEPROM? This overwrites the running firmware. (y/n): ',0
+MSG_FWABT:      DB      'Aborted - nothing written.',CR,LF,0
+        ENDIF
 MSG_LBYT:       DB      ' bytes, ',0
 
 MSG_TSRT:       DB      'Testing ',0
