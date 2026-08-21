@@ -626,7 +626,7 @@ MEM_KP:
         ; the top of RAM. Spans start at the end of the region
         ; below them, never at CODE_END: the slack between
         ; CODE_END and the end of the ROM window is still ROM
-        ; (see PRMMAP).
+        ; (and MEMPROBE rightly skips it).
         IF BIOS_BASE
         IF VIDEO_BASE
         IF VIDEO_BASE < BIOS_BASE

@@ -204,8 +204,10 @@ VHBCLR: MVI     M,' '
         CALL    INIT_PAGE0
         ENDIF
 
-        ; Print memory map
-        CALL    PRMMAP
+        ; The full memory map is not printed at boot - it is
+        ; five to eight lines of a sixteen-line display, and
+        ; the "m" command prints the same information (with
+        ; totals) on demand.
 
         ; System ready - enter monitor
         LXI     H,MSG_READY
@@ -420,187 +422,6 @@ PMSZ2:
         RET
 
 ;========================================================
-; PRRANGE - Print "  <start>-<end>"
-;========================================================
-; Input:  HL = start address, DE = end address (inclusive)
-; Destroys: A, C, D, E, H, L
-;
-; The end address is kept on the stack rather than in DE
-; because PUTCHAR does not preserve DE when video is enabled
-; (V_PUTCH destroys it).
-;========================================================
-PRRANGE:
-        PUSH    D               ; end
-        PUSH    H               ; start
-        LXI     H,MSG_MAP_2SP
-        CALL    PRINTS
-        POP     H               ; start
-        CALL    PRHEX16
-        MVI     A,'-'
-        CALL    PUTCHAR
-        POP     H               ; end
-        CALL    PRHEX16
-        RET
-
-;========================================================
-; PRMMAP - Print memory map
-;========================================================
-; Walks the address space in ascending order, emitting one
-; line per region. Every boundary is an assemble-time
-; constant, so the conditionals below pick the right ordering
-; for the configured layout rather than computing it at run
-; time.
-;
-; The ROM-capable layout (BIOS_BASE > 0) places the ROM window
-; anywhere legal, so the framebuffer may fall either below it
-; (the config.mk.rom case: video CC00, ROM E000) or above it.
-; Those two cases need different orderings, and free RAM must
-; be split around whichever regions sit inside it - reporting
-; one span from DATA_END to BIOS_BASE-1 would wrongly swallow
-; a framebuffer sitting in the middle of it.
-;========================================================
-PRMMAP:
-        IF BIOS_BASE
-
-        LXI     H,MSG_MAP_PZ
-        CALL    PRINTS
-
-        ; Monitor Data (RAM): DATA_BASE..DATA_END-1
-        LXI     H,DATA_BASE
-        LXI     D,DATA_END-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_DAT
-        CALL    PRINTS
-
-        IF VIDEO_BASE
-        IF VIDEO_BASE < BIOS_BASE
-
-        ; --- framebuffer below the ROM window ---
-        ; Free RAM: DATA_END..VIDEO_BASE-1
-        LXI     H,DATA_END
-        LXI     D,VIDEO_BASE-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_RAM
-        CALL    PRINTS
-
-        ; Video: VIDEO_BASE..VID_END-1
-        LXI     H,VIDEO_BASE
-        LXI     D,VID_END-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_VID
-        CALL    PRINTS
-
-        IF VID_END < BIOS_BASE
-        ; Free RAM between the framebuffer and the ROM window
-        LXI     H,VID_END
-        LXI     D,BIOS_BASE-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_RAM
-        CALL    PRINTS
-        ENDIF
-
-        ; Monitor: BIOS_BASE..CODE_END-1
-        LXI     H,BIOS_BASE
-        LXI     D,CODE_END-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_MON
-        CALL    PRINTS
-
-        IF ROM_END
-        ; Free RAM above the ROM window. Starts at ROM_END, not
-        ; CODE_END - the slack between CODE_END and the end of
-        ; the ROM window is still ROM, so calling it free RAM
-        ; would be a lie (and MEMPROBE rightly skips it).
-        LXI     H,ROM_END
-        LXI     D,MEMTOP-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_RAM
-        CALL    PRINTS
-        ENDIF
-
-        ELSE
-
-        ; --- framebuffer above the ROM window ---
-        LXI     H,DATA_END
-        LXI     D,BIOS_BASE-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_RAM
-        CALL    PRINTS
-
-        LXI     H,BIOS_BASE
-        LXI     D,CODE_END-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_MON
-        CALL    PRINTS
-
-        IF ROM_END
-        LXI     H,ROM_END
-        LXI     D,VIDEO_BASE-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_RAM
-        CALL    PRINTS
-        ENDIF
-
-        LXI     H,VIDEO_BASE
-        LXI     D,VID_END-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_VID
-        CALL    PRINTS
-
-        ENDIF
-        ELSE
-
-        ; --- no video ---
-        LXI     H,DATA_END
-        LXI     D,BIOS_BASE-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_RAM
-        CALL    PRINTS
-
-        LXI     H,BIOS_BASE
-        LXI     D,CODE_END-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_MON
-        CALL    PRINTS
-
-        IF ROM_END
-        LXI     H,ROM_END
-        LXI     D,MEMTOP-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_RAM
-        CALL    PRINTS
-        ENDIF
-
-        ENDIF
-
-        ELSE
-
-        ; --- load-at-zero: Monitor, Free RAM, [Video] ---
-        LXI     H,0000H
-        LXI     D,CODE_END-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_MON
-        CALL    PRINTS
-
-        LXI     H,CODE_END
-        LXI     D,MEMTOP-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_RAM
-        CALL    PRINTS
-
-        IF VIDEO_BASE
-        LXI     H,VIDEO_BASE
-        LXI     D,VID_END-1
-        CALL    PRRANGE
-        LXI     H,MSG_MAP_VID
-        CALL    PRINTS
-        ENDIF
-
-        ENDIF
-
-        RET
-
-;========================================================
 ; PRMSG - Print null-terminated string via serial only
 ;========================================================
 ; Used during early boot before video is initialized.
@@ -758,24 +579,6 @@ MSG_VIDEO:
         DB      'Video: VDM-1 64x16 at ',0      ; address printed by BOOT
         ENDIF
 
-; Memory map fragments (addresses printed dynamically)
-        IF BIOS_BASE
-MSG_MAP_PZ:
-        DB      '  0000-00FF  Page Zero',CR,LF,0
-MSG_MAP_DAT:
-        DB      '  Monitor Data',CR,LF,0
-        ENDIF
-MSG_MAP_2SP:
-        DB      '  ',0
-MSG_MAP_RAM:
-        DB      '  Free RAM',CR,LF,0
-MSG_MAP_MON:
-        DB      '  Monitor',CR,LF,0
-        IF VIDEO_BASE
-MSG_MAP_VID:
-        DB      '  Video',CR,LF,0
-        ENDIF
-
 ; Pre-serial heartbeat messages (raw framebuffer, no CRLF)
         IF VIDEO_BASE
 MSG_VHB_SIO:
@@ -802,8 +605,8 @@ MSG_VHB_6850:
 ; state is relocated to a separate RAM segment at DATA_BASE
 ; instead of being interleaved with code. CODE_END marks the
 ; end of ROM-resident code; DATA_END marks the end of the
-; RAM variable segment. Both are used by MEMPROBE/PRMMAP to
-; exclude these ranges when reporting free RAM.
+; RAM variable segment. Both are used by MEMPROBE and the
+; "m" command to exclude these ranges when reporting free RAM.
 ;
 ; When BIOS_BASE = 0 (load-at-zero), there is no ROM/RAM
 ; split - the whole image is one RAM-resident blob, so
