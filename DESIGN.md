@@ -196,6 +196,7 @@ All print routines (PRINTS, PRHEX16, PRCRLF, etc.) call PUTCHAR, so all output a
 | `out` / `o` | `out <port> <byte>` | Write byte to I/O port |
 | `cls` | `cls` | Clear screen (ANSI escape + video clear) |
 | `term` / `e` | `term` | Terminal emulator (SIO2 pass-through) [optional] |
+| `b` / `boot` | `b` | Boot drive 0 of an 88-DCDD / 88-MDS floppy [optional] |
 | `?` / `help` | `?` | Show command list |
 
 ### 5.1 Hex Dump Format
@@ -257,6 +258,48 @@ Transparent serial pass-through to SIO Channel B. Enabled with `ENABLE_TERM=1` i
 - ESC (1BH) exits back to monitor
 - ~200 bytes (code + dispatch + strings)
 
+### 6a.3 Floppy Disk Boot (`b` / `boot`)
+
+Boots drive 0 of a MITS 88-DCDD (8") or 88-MDS (minidisk)
+controller: loads the disk's boot file to 0000H and jumps to it.
+Enabled with `ENABLE_DISKBOOT=1`; takes `DISK_BASE` (controller's
+first port, default 08H) and `BOOT_RAM_BASE` (512-byte scratch
+region, default 04C00H).
+
+Derived from CDBL 3.00 (Eberhard / Douglas), transcribed from the
+published listing and verified byte-for-byte against its reference
+image before adaptation. Auto-detects 8" vs. minidisk geometry,
+walks the 2:1 sector interleave, retries a bad sector 16 times, and
+write-verifies every byte it stores.
+
+The command runs in two phases:
+
+- **ROM phase** — drive select, wait for ready, seek track 0,
+  detect the disk type. Nothing has been written to memory yet, so
+  this phase uses the monitor's normal `PRINTS`/`CONST` routines and
+  can return to the prompt. Unlike stock CDBL, each wait is bounded
+  by a retry count and abortable with ESC; the sector-pulse polls
+  keep their inner loops under the 30 µs `-SVALID` window by pushing
+  the bound out to an outer loop (see the timing note in
+  `diskboot.asm`).
+- **RAM phase** — the sector read engine, relocated to
+  `BOOT_RAM_BASE` and run there, because sector data landing at
+  0000H would otherwise overwrite the running code. Uses the same
+  `label+RELOC` template mechanism as `fwupdate.asm`.
+
+`BOOT_RAM_BASE` must be page aligned, must have an even high byte,
+and its 512-byte region must end at `xxFF` — the read loop's
+terminator is `INR E` wrapping, and the overlay check tests both
+pages with one compare.
+
+On error (`C` checksum, `M` write-verify, `O` overlay) the engine
+prints one line through an inlined `CONOUT` — the monitor's cursor
+variables may be gone by then — and cold-starts the monitor
+(`BIOS_BASE > 0`) or halts (load-at-zero, where the monitor itself
+has been overwritten).
+
+- ~340 bytes (code + dispatch + strings)
+
 ---
 
 ## 7. Serial Subsystem
@@ -282,7 +325,9 @@ src/
 │   ├── serial.asm      Serial console driver (ports 0/1)
 │   └── video.asm       VDM-1 video driver (C000H)
 ├── cmd/
-│   └── term.asm        Terminal emulator (optional, ENABLE_TERM)
+│   ├── term.asm        Terminal emulator (optional, ENABLE_TERM)
+│   ├── fwupdate.asm    EEPROM firmware update (optional, ENABLE_FWUPDATE)
+│   └── diskboot.asm    88-DCDD floppy boot (optional, ENABLE_DISKBOOT)
 ├── lib/
 │   ├── print.asm       PRINTS, PRCRLF, PRHEX8, PRHEX16, PRDEC8, PRDEC16
 │   └── string.asm      STRLEN, STRCMP, STRCPY, STRTOUPPER

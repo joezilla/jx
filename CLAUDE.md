@@ -49,7 +49,10 @@ Reach it through its MCP server (`mcp__bitsby8__*` tools) or the REST API
 The profile for this project is **JX Monitor ROM Test - 88-2SIOJP**: 8080 with
 reset vector `E000H` (stands in for the board's Jump-Start), RAM at `0000H`
 (51K) and `D000H` (4K), VDM-1 at `CC00H`/port `C8H`, an 8K EPROM card at
-`E000H`, and a `mits-88-2sio` card at basePort `10H`.
+`E000H`, a `mits-88-2sio` card at basePort `10H`, and (since v1.0.13) a
+`mits-88-dcdd` floppy controller at basePort `08H` for testing the `b`
+command. Mount a boot disk on drive 0 with `mount_disk` before booting an
+instance.
 
 Test loop:
 1. `make CONFIG=config.mk.rom` → `build/jx.bin`
@@ -107,7 +110,9 @@ src/bios/bios.asm        → Boot, PUTCHAR, GETCHAR, MEMPROBE
   ├── ../lib/string.asm   → STRLEN, STRCMP, STRCPY, STRTOUPPER
   ├── ../lib/banner.asm   → Boot messages
   ├── ../monitor.asm      → Command loop, dispatcher, all command handlers
-  └── ../cmd/term.asm     → Terminal emulator (optional, ENABLE_TERM=1)
+  ├── ../cmd/term.asm     → Terminal emulator (optional, ENABLE_TERM=1)
+  ├── ../cmd/fwupdate.asm → EEPROM firmware update (optional, ENABLE_FWUPDATE=1)
+  └── ../cmd/diskboot.asm → 88-DCDD floppy boot (optional, ENABLE_DISKBOOT=1)
 ```
 
 **BASIC** lives in `src/basic/` with separate standalone and loadable entry points for 4K and 8K variants.
@@ -125,7 +130,7 @@ All hardware settings live in `config.mk` (active config) with presets in `confi
 - `config.mk.rom` — ROM-capable build (monitor relocated off 0000H, e.g. for an EPROM on an 88-2SIOJP board)
 - `config.mk.sim.rom` — cpmsim-testable variant of `config.mk.rom` (adds `SIM_STUB`, since cpmsim always starts at PC=0000H)
 
-Key variables: `MEM_SIZE`, `BIOS_BASE`, `DATA_BASE`, `STACK_TOP`, `VIDEO_BASE`, `SIO_DATA/STATUS/RX_MASK/TX_MASK`, `ENABLE_BASIC` (0/1/2), `ENABLE_TERM` (0/1), `SIM_STUB` (0/1). These are passed to the assembler as `-d` defines.
+Key variables: `MEM_SIZE`, `BIOS_BASE`, `DATA_BASE`, `STACK_TOP`, `VIDEO_BASE`, `SIO_DATA/STATUS/RX_MASK/TX_MASK`, `ENABLE_BASIC` (0/1/2), `ENABLE_TERM` (0/1), `ENABLE_DISKBOOT` (0/1, with `DISK_BASE` and `BOOT_RAM_BASE`), `SIM_STUB` (0/1). These are passed to the assembler as `-d` defines.
 
 ## Assembly Conventions
 

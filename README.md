@@ -39,7 +39,6 @@ make run
 ```
 > ?
 
-JX Monitor Commands:
   d <addr> [<end>]    Hex dump memory
   t [<start> <end>]   RAM test (destructive)
   w <addr> <bb> ..    Write bytes
@@ -49,8 +48,12 @@ JX Monitor Commands:
   l <port>            Load Intel HEX (1=con, 2=aux)
   m                   Memory info
   cls                 Clear screen
-  ? or help           This message
+  b or boot           Boot from floppy drive 0
 ```
+
+The last entry is optional and appears only when the build enables it
+(`ENABLE_DISKBOOT=1`); `term` / `e` and `fw <port>` are gated the same way.
+See `DESIGN.md` section 6a.
 
 All addresses and byte values are hexadecimal.
 

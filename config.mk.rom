@@ -81,6 +81,22 @@ ENABLE_BASIC = 0
 ENABLE_FWUPDATE = 1
 
 # ----------------------------------------------
+# Floppy Disk Boot (88-DCDD / 88-MDS)
+# ----------------------------------------------
+# 'b' command: boot drive 0. DISK_BASE is the controller's
+# first port (it claims DISK_BASE..DISK_BASE+2).
+# BOOT_RAM_BASE is a 512-byte scratch region for the
+# relocated load engine - page aligned, even high byte.
+ENABLE_DISKBOOT = 1
+DISK_BASE = 08H
+BOOT_RAM_BASE = 04C00H
+
+# Cold-start disk boot entry at the traditional Altair boot-PROM
+# address. 0FF00H is offset 1F00H of the 8K EPROM at 0E000H, so it
+# needs no extra hardware. Blank or 0 to omit.
+BOOT_VECTOR = 0FF00H
+
+# ----------------------------------------------
 # Memory Configuration
 # ----------------------------------------------
 MEM_SIZE = 64

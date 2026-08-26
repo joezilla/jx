@@ -1,0 +1,30 @@
+#!/usr/bin/expect -f
+#========================================================
+# Test: b/boot command aborts cleanly with no controller
+#========================================================
+# cpmsim has no 88-DCDD, so nothing answers on ports
+# 08-0Ah. That makes it the ideal negative test: the boot
+# command must bound its wait for a drive and hand the
+# prompt back, rather than hanging the machine the way
+# stock CDBL would.
+
+source [file dirname [info script]]/harness.exp
+
+boot
+
+# The command exists and announces itself
+set output [capture_until_prompt "b"]
+assert_contains $output "Booting drive 0" "b starts a boot attempt"
+
+# ...and gives up instead of hanging forever
+assert_contains $output "No disk in drive 0" "b times out with no controller"
+
+# Long form reaches the same handler
+set output [capture_until_prompt "boot"]
+assert_contains $output "Booting drive 0" "boot is an alias for b"
+
+# Help advertises it
+set output [capture_until_prompt "?"]
+assert_contains $output "b or boot" "help lists the boot command"
+
+cleanup

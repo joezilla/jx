@@ -65,6 +65,12 @@ ENABLE_FWUPDATE = 1
 SIM_STUB = 1
 
 # ----------------------------------------------
+# Floppy Disk Boot (88-DCDD / 88-MDS)
+# ----------------------------------------------
+# Off: cpmsim has no 88-DCDD controller.
+ENABLE_DISKBOOT = 0
+
+# ----------------------------------------------
 # Memory Configuration
 # ----------------------------------------------
 MEM_SIZE = 64

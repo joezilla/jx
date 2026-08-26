@@ -539,6 +539,14 @@ ENABLE_TERM     EQU     0
 ENABLE_FWUPDATE EQU     0
         ENDIF
 
+        IFNDEF ENABLE_DISKBOOT
+ENABLE_DISKBOOT EQU     0
+        ENDIF
+
+        IFNDEF BOOT_VECTOR
+BOOT_VECTOR     EQU     0
+        ENDIF
+
 ;========================================================
 ; Include sub-modules
 ;========================================================
@@ -555,6 +563,7 @@ VIDEO_VARS_EXTERNAL     EQU     1
         INCLUDE ../monitor.asm
         INCLUDE ../cmd/term.asm
         INCLUDE ../cmd/fwupdate.asm
+        INCLUDE ../cmd/diskboot.asm
 
 ;========================================================
 ; Boot Messages
@@ -669,6 +678,52 @@ DATA_END:
         IF BIOS_BASE
         ELSE
 CODE_END:
+        ENDIF
+
+;========================================================
+; Traditional Disk Boot Vector (BOOT_VECTOR, e.g. 0FF00H)
+;========================================================
+; The Altair convention is that a disk boot PROM lives in the
+; last page of memory and is entered from the front panel by
+; examining its first address and pressing RUN. CDBL, the
+; loader src/cmd/diskboot.asm is derived from, was a 1702A at
+; 0FF00H. This puts an equivalent entry point there.
+;
+; No extra hardware is involved: with BIOS_BASE=0E000H and an
+; 8K window, 0FF00H is simply offset 1F00H of the same EPROM.
+; The assembler pads the gap, and it pads with FFH - the
+; erased state of an EPROM - so the fill costs nothing to
+; program.
+;
+; This is a cold-start entry, not a bare JMP: the front-panel
+; gesture starts from an uninitialized machine, so the stack,
+; the console and (for PUTCHAR's cursor variables) the video
+; driver all have to be brought up before DO_BOOT can print
+; anything. It is deliberately the same DO_BOOT the "b"
+; command uses, rather than a second copy of the loader.
+;
+; Placed after DATA_END so CODE_END still marks the end of
+; real code: BAN_CKSUM sums BIOS_BASE..CODE_END-1, and folding
+; ~2.4KB of FFH padding into that would change CK= and make
+; the boot-time checksum a sum of mostly nothing. The cost is
+; that these few bytes are not covered by the self-checksum.
+;
+; Requires BOOT_VECTOR to lie inside the ROM window - the
+; build cannot check that, since BIOS_BASE+ROM_SIZE overflows
+; 16 bits when the window ends at 0FFFFH.
+;========================================================
+        IF BOOT_VECTOR
+        IF ENABLE_DISKBOOT
+        ORG     BOOT_VECTOR
+BOOT_VEC:
+        DI
+        LXI     SP,STACK_TOP
+        CALL    SIO_INIT
+        IF VIDEO_BASE
+        CALL    V_INIT
+        ENDIF
+        JMP     DO_BOOT
+        ENDIF
         ENDIF
 
 ;========================================================

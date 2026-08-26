@@ -94,6 +94,28 @@ ifeq ($(strip $(FW_WRITER_BASE)),)
     FW_WRITER_BASE = 04000H
 endif
 
+# DISK_BASE is the 88-DCDD / 88-MDS controller's first port; it claims three
+# consecutive ports (status/select, sector/command, data). BOOT_RAM_BASE is
+# the 512-byte scratch region the 'b' command relocates its load engine into.
+# It must be page aligned, must have an even high byte, and must sit in free
+# RAM clear of DATA_BASE, the stack, and the FW_* regions - see the layout
+# note in src/cmd/diskboot.asm.
+ifeq ($(strip $(DISK_BASE)),)
+    DISK_BASE = 08H
+endif
+ifeq ($(strip $(BOOT_RAM_BASE)),)
+    BOOT_RAM_BASE = 04C00H
+endif
+
+# BOOT_VECTOR places a cold-start entry to the disk boot at a fixed address -
+# the Altair convention is 0FF00H, the last page of memory, where CDBL and the
+# other disk boot PROMs lived. Blank/0 disables it. It must fall inside the
+# ROM window (with BIOS_BASE=0E000H and ROM_SIZE=02000H, 0FF00H does); the
+# assembler pads the gap with FFH, so the fill costs nothing to program.
+ifeq ($(strip $(BOOT_VECTOR)),)
+    BOOT_VECTOR = 0
+endif
+
 # Assembler defines
 MEM_DEFINES = -dBIOS_BASE=$(BIOS_BASE) -dMEM_SIZE=$(MEM_SIZE)
 MEM_DEFINES += -dDATA_BASE=$(DATA_BASE) -dROM_SIZE=$(ROM_SIZE)
@@ -142,6 +164,18 @@ ifeq ($(ENABLE_FWUPDATE),1)
     MOD_DEFINES += -dEEPROM_SIZE=$(EEPROM_SIZE)
     MOD_DEFINES += -dFW_STAGE_BASE=$(FW_STAGE_BASE)
     MOD_DEFINES += -dFW_WRITER_BASE=$(FW_WRITER_BASE)
+endif
+
+# ENABLE_DISKBOOT: adds the 'b' command, which boots drive 0 of an 88-DCDD
+# (8") or 88-MDS (minidisk) controller. Off for the simulator configs -
+# cpmsim has no 88-DCDD, so the command could only ever report a missing
+# drive there.
+ENABLE_DISKBOOT ?= 0
+ifeq ($(ENABLE_DISKBOOT),1)
+    MOD_DEFINES += -dENABLE_DISKBOOT=1
+    MOD_DEFINES += -dDISK_BASE=$(DISK_BASE)
+    MOD_DEFINES += -dBOOT_RAM_BASE=$(BOOT_RAM_BASE)
+    MOD_DEFINES += -dBOOT_VECTOR=$(BOOT_VECTOR)
 endif
 
 ALL_DEFINES = $(MEM_DEFINES) $(HW_DEFINES) $(MOD_DEFINES)
@@ -208,6 +242,12 @@ ifneq ($(VIDEO_BASE),0)
 endif
 ifeq ($(ENABLE_TERM),1)
 	@echo "  Modules:    term"
+endif
+ifeq ($(ENABLE_DISKBOOT),1)
+	@echo "  Disk:       88-DCDD at $(DISK_BASE), boot RAM $(BOOT_RAM_BASE)"
+endif
+ifneq ($(BOOT_VECTOR),0)
+	@echo "  Boot vector: $(BOOT_VECTOR)"
 endif
 
 hex: dirs check-tools $(SYSTEM_HEX)

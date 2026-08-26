@@ -93,6 +93,17 @@ ENABLE_TERM = 0
 ENABLE_BASIC = 0
 
 # ----------------------------------------------
+# Floppy Disk Boot (88-DCDD / 88-MDS)
+# ----------------------------------------------
+# 'b' command: boot drive 0. DISK_BASE is the controller's
+# first port (it claims DISK_BASE..DISK_BASE+2).
+# BOOT_RAM_BASE is a 512-byte scratch region for the
+# relocated load engine - page aligned, even high byte.
+ENABLE_DISKBOOT = 1
+DISK_BASE = 08H
+BOOT_RAM_BASE = 04C00H
+
+# ----------------------------------------------
 # Memory Configuration
 # ----------------------------------------------
 MEM_SIZE = 48
