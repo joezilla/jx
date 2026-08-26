@@ -93,6 +93,18 @@ ENABLE_TERM = 0
 ENABLE_BASIC = 0
 
 # ----------------------------------------------
+# Floppy Disk Boot (88-DCDD / 88-MDS)
+# ----------------------------------------------
+# On, even though cpmsim has no 88-DCDD - that is
+# precisely what makes it a useful test. With no
+# controller answering, 'b' must time out and hand the
+# prompt back rather than hang, which is what
+# tests/test-diskboot.exp checks on every run.
+ENABLE_DISKBOOT = 1
+DISK_BASE = 08H
+BOOT_RAM_BASE = 04C00H
+
+# ----------------------------------------------
 # Memory Configuration
 # ----------------------------------------------
 MEM_SIZE = 48

@@ -93,6 +93,14 @@ ENABLE_TERM = 0
 ENABLE_BASIC = 0
 
 # ----------------------------------------------
+# Floppy Disk Boot (88-DCDD / 88-MDS)
+# ----------------------------------------------
+# Off by default: this preset targets a serial-only
+# 88-2SIO machine. Set to 1 (and check BOOT_RAM_BASE fits
+# in MEM_SIZE) if a disk controller is present.
+ENABLE_DISKBOOT = 0
+
+# ----------------------------------------------
 # Memory Configuration
 # ----------------------------------------------
 MEM_SIZE = 48

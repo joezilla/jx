@@ -1,0 +1,7 @@
+
+Boot off disk.
+
+Then use disk for programs in proprietary format 
+	ls
+	run
+

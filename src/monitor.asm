@@ -166,6 +166,17 @@ MDISP:
         JZ      DO_FW
         ENDIF
 
+        IF ENABLE_DISKBOOT
+        LHLD    CMDPTR
+        LXI     D,CMD_BOOT
+        CALL    STRCMP
+        JZ      DO_BOOT
+        LHLD    CMDPTR
+        LXI     D,CMD_B
+        CALL    STRCMP
+        JZ      DO_BOOT
+        ENDIF
+
         ; Unknown command
         LXI     H,MSG_UNK
         CALL    PRINTS
@@ -206,6 +217,11 @@ CMD_E:          DB      'E',0
 CMD_FW:         DB      'FW',0
         ENDIF
 
+        IF ENABLE_DISKBOOT
+CMD_BOOT:       DB      'BOOT',0
+CMD_B:          DB      'B',0
+        ENDIF
+
 ;========================================================
 ; DO_HELP
 ;========================================================
@@ -218,6 +234,10 @@ DO_HELP:
         ENDIF
         IF ENABLE_FWUPDATE
         LXI     H,MSG_HFW
+        CALL    PRINTS
+        ENDIF
+        IF ENABLE_DISKBOOT
+        LXI     H,MSG_HBOOT
         CALL    PRINTS
         ENDIF
         LXI     H,MSG_HFTR
@@ -626,7 +646,7 @@ MEM_KP:
         ; the top of RAM. Spans start at the end of the region
         ; below them, never at CODE_END: the slack between
         ; CODE_END and the end of the ROM window is still ROM
-        ; (see PRMMAP).
+        ; (and MEMPROBE rightly skips it).
         IF BIOS_BASE
         IF VIDEO_BASE
         IF VIDEO_BASE < BIOS_BASE
@@ -1290,7 +1310,6 @@ MON_PROMPT:     DB      '# ',0
 
 MSG_HELP:
         DB      CR,LF
-        DB      'JX Monitor Commands:',CR,LF
         DB      '  d <addr> [<end>]    Hex dump memory',CR,LF
         DB      '  t [<start> <end>]   RAM test (destructive)',CR,LF
         DB      '  w <addr> <bb> ..    Write bytes',CR,LF
@@ -1299,8 +1318,7 @@ MSG_HELP:
         DB      '  out <port> <byte>   Write I/O port',CR,LF
         DB      '  l <port>            Load Intel HEX (1=con, 2=aux)',CR,LF
         DB      '  m                   Memory info',CR,LF
-        DB      '  cls                 Clear screen',CR,LF
-        DB      '  ? or help           This message',CR,LF,0
+        DB      '  cls                 Clear screen',CR,LF,0
 
         IF ENABLE_TERM
 MSG_HTRM:
@@ -1310,6 +1328,11 @@ MSG_HTRM:
         IF ENABLE_FWUPDATE
 MSG_HFW:
         DB      '  fw <port>           Firmware update (1=con, 2=aux)',CR,LF,0
+        ENDIF
+
+        IF ENABLE_DISKBOOT
+MSG_HBOOT:
+        DB      '  b or boot           Boot from floppy drive 0',CR,LF,0
         ENDIF
 
 MSG_HFTR:

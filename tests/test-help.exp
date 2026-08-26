@@ -9,7 +9,7 @@ boot
 
 # Test ? command
 set output [capture_until_prompt "?"]
-assert_contains $output "JX Monitor Commands:" "? shows help header"
+assert_contains $output "Addresses and bytes are hex" "? shows the help footer"
 assert_contains $output "d <addr>" "? lists dump command"
 assert_contains $output "w <addr>" "? lists write command"
 assert_contains $output "in <port>" "? lists in command"
@@ -17,7 +17,7 @@ assert_contains $output "out <port>" "? lists out command"
 
 # Test help command
 set output [capture_until_prompt "help"]
-assert_contains $output "JX Monitor Commands:" "help shows help header"
+assert_contains $output "m                   Memory info" "help lists mem command"
 assert_contains $output "g <addr>" "help lists go command"
 
 cleanup
