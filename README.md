@@ -7,9 +7,11 @@ A machine-language monitor and BASIC interpreter for Intel 8080, written entirel
 - Pure Intel 8080 assembly -- no C compiler required
 - Altair BASIC 3.2 (4K edition) -- standalone boot or loadable via monitor
 - Interactive monitor with hex dump, memory test, write, go, and I/O port commands
+- Boots software from a MITS 88-DCDD (8") or 88-MDS (minidisk) floppy controller
 - Dual output: serial console AND VDM-1 memory-mapped video display
 - Memory detection at boot (32KB--64KB)
-- Single flat binary (~3.5KB with video, ~3.1KB serial-only), assembled from one source file
+- ROM-capable: relocatable off 0000H for burning into a real EPROM
+- Single flat binary (~4.2KB for the default build), assembled from one source file
 - Builds to Intel HEX for direct simulator loading
 
 ## Quick Start
@@ -37,7 +39,7 @@ make run
 ## Monitor Commands
 
 ```
-> ?
+# ?
 
   d <addr> [<end>]    Hex dump memory
   t [<start> <end>]   RAM test (destructive)
@@ -48,28 +50,114 @@ make run
   l <port>            Load Intel HEX (1=con, 2=aux)
   m                   Memory info
   cls                 Clear screen
+  term / e            Terminal (SIO2 pass-through)
+  fw <port>           Firmware update (1=con, 2=aux)
   b or boot           Boot from floppy drive 0
+
+Addresses and bytes are hex.
 ```
 
-The last entry is optional and appears only when the build enables it
-(`ENABLE_DISKBOOT=1`); `term` / `e` and `fw <port>` are gated the same way.
+The last three are optional modules and appear only when the build enables
+them -- `ENABLE_TERM`, `ENABLE_FWUPDATE` and `ENABLE_DISKBOOT` respectively.
 See `DESIGN.md` section 6a.
 
-All addresses and byte values are hexadecimal.
+`?` and `help` are not listed but both still work. All addresses and byte
+values are hexadecimal.
 
 ### Example Session
 
 ```
-JX/8080 Monitor v0.4
-Scanning: ********
-Memory: 64KB
-Video: VDM-1 64x16 at C000
+Scanning: *************
+Memory: 54KB
+
+JX/8080 Version 0.9 gf6c005f+ 260826.1448
+SIO 11/10 RX=01 TX=02 6850  CK=410F
+Video: VDM-1 64x16 at CC00
 
 Type ? for help.
-> d F400 F40F
-F400: F3 31 00 F4 21 D1 FD CD  D1 F4 21 F8 FD CD D1 F4 
-> g 0100
+# d E000 E00F
+E000: C3 0F E0 C3 8E E0 C3 83  E1 C3 B8 E0 C3 A6 E0 F3  ................
+# g 0100
 ```
+
+## Booting from Floppy
+
+`b` (or `boot`) loads drive 0's boot file into memory at 0000H and jumps to
+it, the way an Altair boot PROM does. It drives a MITS 88-DCDD (8", 32
+sectors/track) or 88-MDS (minidisk, 16 sectors/track) controller and works
+out which is attached by itself.
+
+```
+# b
+Booting drive 0...
+```
+
+The loader is **CDBL 3.00** by Martin Eberhard and Mike Douglas, transcribed
+from the published listing and verified byte-for-byte against its 256-byte
+reference image. It walks the 2:1 sector interleave, retries a bad sector up
+to 16 times, and reads back every byte it stores.
+
+### Getting out of it
+
+A boot PROM waits forever for a drive; a monitor command has to be able to
+hand the prompt back. Every wait before the load starts is bounded, and
+polls the console so **ESC** aborts:
+
+| Stage | Bound | Message |
+|-------|-------|---------|
+| Wait for drive ready | 65536 polls (~2.5 s) | `No disk in drive 0.` |
+| Servo settle (`-MVHEAD`) | 65536 polls | `Drive not responding.` |
+| Seek to track 0 | 200 steps | `Drive not responding.` |
+| 8"/minidisk detection | 65536 outer passes | `No disk in drive 0.` |
+
+No controller at all is the easy case: a floating bus reads FFH, `DRVRDY` is
+active low, so the first wait sees "not ready" and gives up in about two and
+a half seconds. Either exit deselects the drive before returning, so the head
+is not left loaded.
+
+Once the load actually starts there is no abort -- the read loop has roughly
+64 T-states per byte and a console poll does not fit. From there the only
+exits are completion (jump to 0000H) or a hard error: `C` checksum, `M`
+write-verify, `O` memory overlay, each printed with the offending address
+before a monitor cold start.
+
+### Boot vector at 0FF00H
+
+Setting `BOOT_VECTOR` puts a cold-start entry to the same code at a fixed
+address. 0FF00H is the convention -- the last page of memory, where CDBL and
+the other Altair disk boot PROMs lived -- so the traditional front-panel
+gesture (examine 0FF00H, press RUN) boots the disk.
+
+With `BIOS_BASE=0E000H` and an 8K window that address is simply offset 1F00H
+of the same EPROM, so it costs no extra hardware, and the assembler fills the
+gap with FFH -- the erased state of an EPROM. It is a cold-start entry rather
+than a bare jump, because the front-panel gesture starts from an
+uninitialized machine:
+
+```asm
+        DI
+        LXI     SP,STACK_TOP
+        CALL    SIO_INIT
+        CALL    V_INIT          ; only when VIDEO_BASE is set
+        JMP     DO_BOOT
+```
+
+Thirteen bytes with video, ten without. `BOOT_VECTOR` must lie inside the ROM window; the build
+cannot check that for you, because `BIOS_BASE+ROM_SIZE` overflows 16 bits
+when the window ends at 0FFFFH. It is off by default and only meaningful on a
+ROM build -- on a load-at-zero build 0FF00H is RAM.
+
+### Making a boot disk
+
+```bash
+make disk                                    # image from the current config
+node scripts/create-boot-disk.js --8inch -o out.dsk build/jx.hex
+node scripts/extract-boot-hex.js out.dsk     # read the boot code back out
+```
+
+Images are raw 8" format, 77 tracks x 32 sectors x 137 bytes = 337,568 bytes.
+Sector 0 carries the track number OR'd with 80H as a sync byte, then the
+file's length as a 16-bit count, which is how the loader knows when to stop.
 
 ## Altair BASIC
 
@@ -113,9 +201,9 @@ make disk            # Create boot disk image
 The default build loads the monitor at address 0000H (`BIOS_BASE=0`):
 
 ```
-0000-xxxx  Monitor code + data (~3.5KB)
+0000-xxxx  Monitor code + data (~4.2KB)
 xxxx-FFFF  Free RAM
-C000-C3FF  VDM-1 video framebuffer (64x16), if enabled
+CC00-CFFF  VDM-1 video framebuffer (64x16), if enabled
 ```
 
 Setting `BIOS_BASE` to a nonzero address relocates the monitor and
@@ -143,7 +231,7 @@ The 8251 and 6850 have opposite RX/TX mask bit assignments. Both are auto-initia
 
 ### Video Display
 - Processor Technology VDM-1 (optional, enabled by default)
-- 64 columns x 16 rows, memory-mapped at C000H-C3FFH
+- 64 columns x 16 rows, memory-mapped at CC00H-CFFFH by default (`VIDEO_BASE`)
 - Software scrolling, cursor tracking
 - All monitor output goes to both serial and video simultaneously
 
@@ -182,7 +270,7 @@ Several configs are provided. Each contains all three serial presets as comments
 
 | Config | Default Preset | Description |
 |--------|---------------|-------------|
-| `config.mk` | Altair 88-2SIO | Primary config (real hardware) |
+| `config.mk` | IMSAI SIO-2 (8251) | Primary config (real hardware) |
 | `config.mk.sim` | cpmsim | Simulator (no UART init, no TX poll) |
 | `config.mk.sio` | Altair 88-2SIO | Alternate Altair config |
 | `config.mk.rom` | 88-2SIOJP (6850) | ROM-capable build, monitor relocated off 0000H |
@@ -230,13 +318,17 @@ A machine profile assembles the cards. The ROM build is exercised by
 | `ramMid` (`ram-card`) | `D000H`, 4K |
 | `eeprom` (`eprom-card`) | base `E000H`, 8K (the 2764/28C64 window) |
 | `sio` (`mits-88-2sio`) | basePort `10H` -- status `10H`/`12H`, data `11H`/`13H` |
+| `dcdd` (`mits-88-dcdd`) | basePort `08H` -- status/select `08H`, sector/command `09H`, data `0AH` |
 
 Card and profile settings must agree with the config the ROM was built
 from: `BIOS_BASE`/`EEPROM_SIZE` with the EPROM card, `VIDEO_BASE`/
 `VIDEO_CTRL` with the VDM-1 card, and `SIO_STATUS`/`SIO_DATA` with the
 2SIO card's `basePort` (the 6850 puts control/status at the even address
 and data at the odd one, so `SIO_STATUS` = basePort and `SIO_DATA` =
-basePort+1).
+basePort+1), and `DISK_BASE` with the 88-DCDD card's `basePort`.
+
+To exercise `b`, mount a boot disk on drive 0 with `mount_disk` before
+starting the instance.
 
 ### Identifying a build
 
@@ -289,7 +381,9 @@ from an AI assistant or a script without touching the web UI:
 3. `create_transient_instance` with the new `profileRef` -- creates and
    boots a memory-only instance
 4. `read_instance_console` / `write_instance_console` -- check the banner
-   and drive the monitor (send a real `CR`, not the two characters `\r`)
+   and drive the monitor. Press Enter with `bytes: [13]` or
+   `lineEnding: "cr"`; a literal `CR` in a text field may be folded to LF,
+   which the monitor's line editor ignores
 5. `destroy_machine_instance` -- transients leave no residue
 
 Useful companions: `list_machine_profiles`, `get_machine_profile`,
@@ -339,8 +433,25 @@ Secondary serial port (`SIO2_*`) uses the same options with the `SIO2_` prefix.
 | `DATA_BASE` | `0100H` | RAM data segment address (used only when BIOS_BASE > 0) |
 | `STACK_TOP` | *(auto)* | Stack address (auto = MEMTOP; set explicitly if MEM_SIZE doesn't match hardware) |
 | `VIDEO_BASE` | `0CC00H` | VDM-1 base address (0 = disabled) |
-| `ENABLE_BASIC` | `0` | Include Altair BASIC (0 or 1) |
+| `ROM_SIZE` | `02000H` | EPROM window size at `BIOS_BASE` (ROM builds) |
+| `ENABLE_BASIC` | `0` | Include Altair BASIC (0, 1 = 4K, 2 = 8K) |
 | `ENABLE_TERM` | `0` | Include terminal mode (0 or 1) |
+| `ENABLE_FWUPDATE` | `0` | Include the `fw` self-reflash command (ROM builds) |
+
+### Disk Boot Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `ENABLE_DISKBOOT` | `0` | Include the `b` / `boot` command (0 or 1) |
+| `DISK_BASE` | `08H` | 88-DCDD first port; it claims `DISK_BASE`..`DISK_BASE+2` |
+| `BOOT_RAM_BASE` | `04C00H` | 512-byte scratch the load engine relocates into |
+| `BOOT_VECTOR` | `0` | Fixed cold-start boot entry, e.g. `0FF00H`; 0 disables |
+
+`BOOT_RAM_BASE` has three constraints baked into the loader's tightest code:
+it must be page aligned, its high byte must be even (the overlay check tests
+both pages with one compare), and its 512-byte region must end at `xxFF` --
+the read loop's terminator is `INR E` wrapping to zero. It also has to sit in
+free RAM clear of `DATA_BASE`, the stack, and the `FW_*` regions.
 
 Video geometry (`VIDEO_COLS`, `VIDEO_ROWS`, `VIDEO_CTRL`) is also configurable. See `config.mk` for the full list.
 
@@ -363,20 +474,31 @@ jx/
 │   │   ├── altair_basic.asm       Altair BASIC 3.2 (4K)
 │   │   ├── basic_standalone.asm   Standalone entry point
 │   │   └── basic_loadable.asm     Loadable entry point
+│   ├── cmd/
+│   │   ├── term.asm       Terminal emulator (ENABLE_TERM)
+│   │   ├── fwupdate.asm   EEPROM self-reflash (ENABLE_FWUPDATE)
+│   │   └── diskboot.asm   88-DCDD floppy boot (ENABLE_DISKBOOT)
+│   ├── disk/
+│   │   └── bootloader.asm Commented disassembly of the MITS boot PROM
 │   ├── lib/
 │   │   ├── print.asm   Output formatting (hex, decimal, strings)
-│   │   └── string.asm  String operations (strlen, strcmp, etc.)
+│   │   ├── string.asm  String operations (strlen, strcmp, etc.)
+│   │   └── banner.asm  Boot banner and build stamp
 │   └── monitor.asm     Monitor command processor
 ├── scripts/
-│   └── run-boot.sh     Build and run helper
+│   ├── run-boot.sh          Build and run helper
+│   ├── create-boot-disk.js  Make a bootable .dsk from HEX or binary
+│   └── extract-boot-hex.js  Read boot code back out of a .dsk
 ├── tests/
 │   ├── run-tests.sh    Test runner entry point
 │   ├── harness.exp     Shared Expect framework
-│   └── test-*.exp      Functional tests (boot, dump, write, io, basic)
+│   └── test-*.exp      Functional tests (boot, dump, write, io, diskboot)
 ├── docs/
 │   ├── BUILD_SYSTEM.md Build system reference
 │   ├── TOOLCHAIN.md    Assembler and simulator reference
 │   └── Z80ASM_BUGS.md  Known z80asm issues
+├── .claude/skills/     Hardware programming references (88-DCDD, VDM-1,
+│                       8251, 6850, 88-2SIOJP, MITS bootloader, ...)
 ├── DESIGN.md           Architecture specification
 └── build/              Output directory (generated)
     └── jx.hex          Monitor binary (Intel HEX)
@@ -410,6 +532,8 @@ See `docs/Z80ASM_BUGS.md` for details.
 ## Credits
 
 - **z80pack**: Udo Munk (https://github.com/udo-munk/z80pack)
+- **CDBL** (the disk boot loader behind `b`): Martin Eberhard and Mike Douglas
+- **Altair BASIC 3.2**: Bill Gates, Paul Allen, Monte Davidoff
 - **Intel 8080**: Classic 8-bit microprocessor architecture
 
 ---
