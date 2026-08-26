@@ -178,6 +178,15 @@ ifeq ($(ENABLE_DISKBOOT),1)
     MOD_DEFINES += -dBOOT_VECTOR=$(BOOT_VECTOR)
 endif
 
+# Byte offset of BIOS_BASE within SYSTEM_BIN. A SIM_STUB image is ORGed at
+# 0000H (cpmsim always starts at PC=0000H) and carries the monitor BIOS_BASE
+# bytes in; every other ROM build starts at BIOS_BASE, so the offset is 0.
+ifeq ($(SIM_STUB),1)
+    CKSUM_ORG = 0x$$BB
+else
+    CKSUM_ORG = 0
+endif
+
 ALL_DEFINES = $(MEM_DEFINES) $(HW_DEFINES) $(MOD_DEFINES)
 
 # Disk image name reflects the active configuration
@@ -229,8 +238,17 @@ all: dirs check-tools $(SYSTEM_BIN)
 	@echo "Build complete: $(SYSTEM_BIN)"
 	@echo "  Build:      $(VER_MAJOR).$(VER_MINOR) $(BUILD_STAMP)"
 ifneq ($(BIOS_BASE),0)
+# Must sum exactly BIOS_BASE..CODE_END-1 - the same range BAN_CKSUM walks at
+# boot - not the whole file. With BOOT_VECTOR set the image runs out to the
+# vector's page and carries the FFH padding in between, so a whole-file sum
+# would never match the banner's CK= and the check would be worse than
+# useless. Both bounds come from the listing's symbol table.
 	@printf "  Checksum:   "
-	@od -An -v -tu1 $(SYSTEM_BIN) | \
+	@CE=`grep -oE 'CODE_END +[0-9a-f]{4}' $(BIOS_DIR)/bios.lis | head -1 | awk '{print $$2}'`; \
+	 BB=`grep -oE 'BIOS_BASE +[0-9a-f]{4}' $(BIOS_DIR)/bios.lis | head -1 | awk '{print $$2}'`; \
+	 N=`expr $$(( 0x$$CE - 0x$$BB ))`; \
+	 SKIP=`expr $$(( $(CKSUM_ORG) ))`; \
+	 tail -c +`expr $$SKIP + 1` $(SYSTEM_BIN) | head -c $$N | od -An -v -tu1 | \
 	    awk '{for(i=1;i<=NF;i++) s+=$$i} END {printf "%04X  (banner shows CK=)\n", s%65536}'
 endif
 	@echo "  Monitor at: $(BIOS_BASE)"
